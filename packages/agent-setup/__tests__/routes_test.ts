@@ -156,7 +156,7 @@ interface LeaseResponse {
 // (leaseProjection and restore both parse the stored JSON through the schema).
 const FULL_CONFIG_JSON = (apiKeyId: string): string => JSON.stringify({
   apiKeyId,
-  claudeCode: { model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null, defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, modelDiscovery: true },
+  claudeCode: { model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null, defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, disableArtifact: false, modelDiscovery: true },
   codex: { model: null, reasoningEffort: null },
   pi: { model: null, provider: 'floway', thinkingLevel: null, retry: { enabled: null, maxRetries: null } },
   omp: { model: null, provider: 'floway', retry: { enabled: null, maxRetries: null } },
@@ -248,6 +248,30 @@ test('POST restores the latest saved configuration whose key is still selectable
   // A reopen inserts a brand-new independent lease; it never reuses a token.
   expect(reopened.token).not.toBe(first.token);
   assertEquals(reopened.configurationRevision, 1);
+});
+
+test('legacy saved configuration restores every preference and serves both Claude installers', async () => {
+  const h = harness();
+  const first = await create(h);
+  const { disableArtifact: _, ...legacyClaudeCode } = first.configuration.claudeCode;
+  const legacy = {
+    ...first.configuration,
+    claudeCode: { ...legacyClaudeCode, model: 'saved-claude', effortLevel: 'high', disableAgentView: true, modelDiscovery: false },
+    codex: { model: 'saved-codex', reasoningEffort: 'custom-effort' },
+    pi: { ...first.configuration.pi, model: 'saved-pi', provider: 'personal' },
+    omp: { ...first.configuration.omp, model: 'saved-omp', provider: 'work' },
+  };
+  await h.repo.updateConfiguration({
+    userId: USER_ID, token: first.token, expectedRevision: first.configurationRevision,
+    configurationJson: JSON.stringify(legacy), now: Date.now(), expiresAt: Date.now() + 300_000,
+  });
+  const reopened = await create(h);
+  expect(reopened.configuration).toEqual({ ...legacy, claudeCode: { ...legacy.claudeCode, disableArtifact: false } });
+  for (const [extension, assignment] of [['sh', "SETUP_CLAUDE_DISABLE_ARTIFACT=''"], ['ps1', '$SetupClaudeDisableArtifact = $false']]) {
+    const response = await h.request(`/api/setup/${first.token}/claude.${extension}`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(assignment);
+  }
 });
 
 test('POST falls back to a first-use default when the latest config points at an unselectable key', async () => {

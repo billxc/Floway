@@ -9,6 +9,35 @@ import type { RunResult } from './harness';
 import { renderPowerShellPrefix, renderShellPrefix } from '../../../src/render.ts';
 import { SETUP_BASH_CLAUDE, SETUP_BASH_CODEX, SETUP_POWERSHELL_CLAUDE, SETUP_POWERSHELL_CODEX, SETUP_POWERSHELL_COMMON } from '../../../src/script-assets.generated.ts';
 
+for (const shell of ['Bash', 'PowerShell'] as const) {
+  test(`${shell}: artifact and agent-view opt-outs remain independent across re-runs`, { timeout: 180_000 }, async ({ skip }) => {
+    if (shell === 'PowerShell' && !hostPwsh) return skip(true, 'no PowerShell interpreter on this host');
+    const ws = makeWorkspace();
+    placeFakeClaude(ws.binDir);
+    mkdirSync(join(ws.home, '.claude'), { recursive: true });
+    const runInstaller = shell === 'Bash' ? runShellInstaller : runPowerShellInstaller;
+    for (const [disableArtifact, disableAgentView] of [[true, false], [true, true], [false, true], [false, false]] as const) {
+      const previous = existsSync(settingsPathFor(ws)) ? readSettings(settingsPathFor(ws)) : { theme: 'dark', enableArtifact: true };
+      // Reintroduce the deprecated key to prove cleanup in both toggle states.
+      writeFileSync(settingsPathFor(ws), JSON.stringify({ ...previous, disableArtifact: true }));
+      const run = await runInstaller({
+        workspace: ws, baseUrl: modelServer.url,
+        configuration: claudeConfig({ disableArtifact, disableAgentView }),
+      });
+      expect(run.code, `installer should succeed:\n${run.combined}`).toBe(0);
+      const settings = readSettings(settingsPathFor(ws));
+      if (disableArtifact) expect(settings.enableArtifact).toBe(false);
+      else expect(settings).not.toHaveProperty('enableArtifact');
+      if (disableAgentView) expect(settings.disableAgentView).toBe(true);
+      else expect(settings).not.toHaveProperty('disableAgentView');
+      expect(settings).not.toHaveProperty('disableArtifact');
+      expect(settings.theme).toBe('dark');
+      expect(existsSync(installerMarker(ws))).toBe(false);
+    }
+    expect(modelServer.requests).toHaveLength(0);
+  });
+}
+
 test('existing CLI is used and the installer hook is not called', { timeout: 180_000 }, async () => {
   const ws = makeWorkspace();
   placeFakeClaude(ws.binDir);
@@ -53,10 +82,10 @@ test('unrelated settings and env keys are preserved', { timeout: 180_000 }, asyn
   }));
   const run = await runShellInstaller({
     workspace: ws, baseUrl: modelServer.url,
-    configuration: claudeConfig({ model: 'claude-opus-x[1m]', defaultFableModel: 'fable-x', defaultOpusModel: 'opus-x', defaultSonnetModel: 'sonnet-x', defaultHaikuModel: 'haiku-x', effortLevel: 'high', cleanupPeriodDays: 365, optOutAiAttribution: true, disableAutoMemory: true, disableAgentView: true, modelDiscovery: true }),
+    configuration: claudeConfig({ model: 'claude-opus-x[1m]', defaultFableModel: 'fable-x', defaultOpusModel: 'opus-x', defaultSonnetModel: 'sonnet-x', defaultHaikuModel: 'haiku-x', effortLevel: 'high', cleanupPeriodDays: 365, optOutAiAttribution: true, disableAutoMemory: true, disableAgentView: true, disableArtifact: true, modelDiscovery: true }),
   });
   expect(run.code, `should succeed:\n${run.combined}`).toBe(0);
-  const settings = readSettings(settingsPathFor(ws)) as { theme: string; permissions: unknown; effortLevel: string; cleanupPeriodDays: number; autoMemoryEnabled: boolean; disableAgentView: boolean; attribution: Record<string, unknown>; env: Record<string, string> };
+  const settings = readSettings(settingsPathFor(ws)) as { theme: string; permissions: unknown; effortLevel: string; cleanupPeriodDays: number; autoMemoryEnabled: boolean; disableAgentView: boolean; enableArtifact: boolean; attribution: Record<string, unknown>; env: Record<string, string> };
   expect(settings.theme, 'unrelated top-level key preserved').toBe('dark');
   expect(JSON.stringify(settings.permissions), 'unrelated nested object preserved').toBe(JSON.stringify({ allow: ['Bash(ls:*)'] }));
   expect(settings.env.OTHER_TOOL, 'unrelated env key preserved').toBe('keep-me');
@@ -69,6 +98,8 @@ test('unrelated settings and env keys are preserved', { timeout: 180_000 }, asyn
   expect(settings.cleanupPeriodDays, 'cleanupPeriodDays maps to the top-level numeric setting').toBe(365);
   expect(settings.autoMemoryEnabled, 'the auto-memory opt-out maps to autoMemoryEnabled: false').toBe(false);
   expect(settings.disableAgentView, 'the agent-view opt-out maps to disableAgentView: true').toBe(true);
+  expect(settings.enableArtifact, 'the artifact opt-out maps to enableArtifact: false').toBe(false);
+  expect(settings).not.toHaveProperty('disableArtifact');
   expect(JSON.stringify(settings.attribution), 'attribution opt-out values are written without replacing unrelated keys').toBe(JSON.stringify({ keep: 'yes', commit: '', pr: '', sessionUrl: false }));
 });
 
@@ -82,6 +113,8 @@ test('optional keys are removed when unset', { timeout: 180_000 }, async () => {
     cleanupPeriodDays: 180,
     autoMemoryEnabled: false,
     disableAgentView: true,
+    enableArtifact: false,
+    disableArtifact: true,
     attribution: { commit: 'stale-commit', pr: 'stale-pr', sessionUrl: true, keep: 'yes' },
     env: {
       ANTHROPIC_MODEL: 'stale-model',
@@ -106,6 +139,8 @@ test('optional keys are removed when unset', { timeout: 180_000 }, async () => {
   expect(!('cleanupPeriodDays' in settings)).toBeTruthy();
   expect(!('autoMemoryEnabled' in settings)).toBeTruthy();
   expect(!('disableAgentView' in settings)).toBeTruthy();
+  expect(settings).not.toHaveProperty('enableArtifact');
+  expect(settings).not.toHaveProperty('disableArtifact');
   expect(JSON.stringify(settings.attribution), 'managed attribution keys removed while unrelated keys survive').toBe(JSON.stringify({ keep: 'yes' }));
   expect(settings.env.KEEP, 'unrelated env key preserved through removal').toBe('yes');
 });
@@ -324,12 +359,12 @@ test('PowerShell: existing CLI configures and preserves unrelated keys', { timeo
   writeFileSync(settingsPathFor(ws), JSON.stringify({ theme: 'dark', attribution: { keep: 'yes' }, env: { OTHER_TOOL: 'keep-me' } }));
   const run = await runPowerShellInstaller({
     workspace: ws, baseUrl: modelServer.url,
-    configuration: claudeConfig({ model: 'claude-opus-x[1m]', defaultFableModel: 'fable-x', defaultOpusModel: 'opus-x', defaultSonnetModel: 'sonnet-x', effortLevel: 'high', cleanupPeriodDays: 180, optOutAiAttribution: true, disableAutoMemory: true, disableAgentView: true, modelDiscovery: true }),
+    configuration: claudeConfig({ model: 'claude-opus-x[1m]', defaultFableModel: 'fable-x', defaultOpusModel: 'opus-x', defaultSonnetModel: 'sonnet-x', effortLevel: 'high', cleanupPeriodDays: 180, optOutAiAttribution: true, disableAutoMemory: true, disableAgentView: true, disableArtifact: true, modelDiscovery: true }),
   });
   expect(run.code, `should succeed:\n${run.combined}`).toBe(0);
   expect(existsSync(powerShellCallerSurvivalPath(ws))).toBeTruthy();
   expect(!existsSync(installerMarker(ws))).toBeTruthy();
-  const settings = readSettings(settingsPathFor(ws)) as { theme: string; effortLevel: string; cleanupPeriodDays: number; autoMemoryEnabled: boolean; disableAgentView: boolean; attribution: Record<string, unknown>; env: Record<string, string> };
+  const settings = readSettings(settingsPathFor(ws)) as { theme: string; effortLevel: string; cleanupPeriodDays: number; autoMemoryEnabled: boolean; disableAgentView: boolean; enableArtifact: boolean; attribution: Record<string, unknown>; env: Record<string, string> };
   expect(settings.theme, 'unrelated top-level key preserved').toBe('dark');
   expect(settings.env.OTHER_TOOL, 'unrelated env key preserved').toBe('keep-me');
   expect(settings.env.ANTHROPIC_BASE_URL, 'base URL written').toBe(modelServer.url);
@@ -342,6 +377,8 @@ test('PowerShell: existing CLI configures and preserves unrelated keys', { timeo
   expect(settings.cleanupPeriodDays, 'cleanupPeriodDays maps to the top-level numeric setting').toBe(180);
   expect(settings.autoMemoryEnabled, 'the auto-memory opt-out maps to autoMemoryEnabled: false').toBe(false);
   expect(settings.disableAgentView, 'the agent-view opt-out maps to disableAgentView: true').toBe(true);
+  expect(settings.enableArtifact, 'the artifact opt-out maps to enableArtifact: false').toBe(false);
+  expect(settings).not.toHaveProperty('disableArtifact');
   expect(JSON.stringify(settings.attribution), 'attribution opt-out maps to the documented values').toBe(JSON.stringify({ keep: 'yes', commit: '', pr: '', sessionUrl: false }));
   expect(settings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, 'discovery maps to the documented env key').toBe('1');
 });
@@ -357,6 +394,8 @@ test('PowerShell: optional keys are removed when unset', { timeout: 180_000 }, a
     cleanupPeriodDays: 365,
     autoMemoryEnabled: false,
     disableAgentView: true,
+    enableArtifact: false,
+    disableArtifact: true,
     attribution: { commit: 'stale', pr: 'stale', sessionUrl: true, keep: 'yes' },
     env: { ANTHROPIC_MODEL: 'stale', CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', KEEP: 'yes' },
   }));
@@ -369,6 +408,8 @@ test('PowerShell: optional keys are removed when unset', { timeout: 180_000 }, a
   expect(!('cleanupPeriodDays' in settings)).toBeTruthy();
   expect(!('autoMemoryEnabled' in settings)).toBeTruthy();
   expect(!('disableAgentView' in settings)).toBeTruthy();
+  expect(settings).not.toHaveProperty('enableArtifact');
+  expect(settings).not.toHaveProperty('disableArtifact');
   expect(JSON.stringify(settings.attribution), 'managed attribution keys removed while unrelated keys survive').toBe(JSON.stringify({ keep: 'yes' }));
   expect(settings.env.KEEP, 'unrelated env key preserved').toBe('yes');
 });

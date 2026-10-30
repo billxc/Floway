@@ -49,6 +49,10 @@ export const agentSetupConfigurationSchema = z.object({
     // Ref: https://code.claude.com/docs/en/settings#available-settings
     disableAutoMemory: z.boolean(),
     disableAgentView: z.boolean(),
+    // The artifact opt-out writes enableArtifact: false, not the deprecated
+    // disableArtifact setting. Default only this field for saved configurations.
+    // Ref: https://code.claude.com/docs/en/settings#available-settings
+    disableArtifact: z.boolean().default(false),
     modelDiscovery: z.boolean(),
   }).strict(),
   codex: z.object({
@@ -76,6 +80,7 @@ export const defaultAgentSetupConfiguration = (apiKeyId: string): AgentSetupConf
     optOutAiAttribution: false,
     disableAutoMemory: false,
     disableAgentView: false,
+    disableArtifact: false,
     modelDiscovery: true,
   },
   codex: {

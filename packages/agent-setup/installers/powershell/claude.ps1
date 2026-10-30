@@ -120,6 +120,9 @@ function Write-SetupClaudeSettings {
   else { Remove-SetupProp $document 'autoMemoryEnabled' }
   if ($SetupClaudeDisableAgentView) { Set-SetupProp $document 'disableAgentView' $true }
   else { Remove-SetupProp $document 'disableAgentView' }
+  Remove-SetupProp $document 'disableArtifact'
+  if ($SetupClaudeDisableArtifact) { Set-SetupProp $document 'enableArtifact' $false }
+  else { Remove-SetupProp $document 'enableArtifact' }
   if ($SetupClaudeOptOutAiAttribution) {
     if ($document.PSObject.Properties.Name -notcontains 'attribution') {
       $document | Add-Member -NotePropertyName attribution -NotePropertyValue ([PSCustomObject]@{})

@@ -19,6 +19,7 @@ const fullConfiguration: AgentSetupConfiguration = {
     optOutAiAttribution: true,
     disableAutoMemory: true,
     disableAgentView: true,
+    disableArtifact: true,
     modelDiscovery: true,
   },
   codex: {
@@ -39,12 +40,39 @@ describe('agentSetupConfigurationSchema', () => {
     expect(agentSetupConfigurationSchema.safeParse(fullConfiguration).success).toBe(true);
   });
 
+  test('defaults a missing artifact flag without discarding legacy preferences', () => {
+    const { disableArtifact: _, ...legacyClaudeCode } = fullConfiguration.claudeCode;
+    const legacy = { ...fullConfiguration, claudeCode: legacyClaudeCode };
+    expect(agentSetupConfigurationSchema.parse(JSON.parse(JSON.stringify(legacy)))).toEqual({
+      ...fullConfiguration,
+      claudeCode: { ...fullConfiguration.claudeCode, disableArtifact: false },
+    });
+  });
+
+  test('validates independent artifact and agent-view opt-outs', () => {
+    for (const disableArtifact of [true, false]) {
+      for (const disableAgentView of [true, false]) {
+        const configuration = {
+          ...fullConfiguration,
+          claudeCode: { ...fullConfiguration.claudeCode, disableArtifact, disableAgentView },
+        };
+        expect(agentSetupConfigurationSchema.parse(configuration)).toEqual(configuration);
+      }
+    }
+    for (const disableArtifact of ['true', 1, null]) {
+      expect(agentSetupConfigurationSchema.safeParse({
+        ...fullConfiguration,
+        claudeCode: { ...fullConfiguration.claudeCode, disableArtifact },
+      }).success).toBe(false);
+    }
+  });
+
   test('accepts nulls for every optional Claude field and an open Codex effort', () => {
     expect(agentSetupConfigurationSchema.safeParse({
       apiKeyId: 'key-a',
       claudeCode: {
         model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null,
-        defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, modelDiscovery: false,
+        defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, disableArtifact: false, modelDiscovery: false,
       },
       codex: { model: null, reasoningEffort: 'vendor-tier' },
       pi: { model: null, provider: 'floway', thinkingLevel: null, retry: { enabled: null, maxRetries: null } },
@@ -136,7 +164,7 @@ describe('defaultAgentSetupConfiguration', () => {
       apiKeyId: 'key-a',
       claudeCode: {
         model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null,
-        defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, modelDiscovery: true,
+        defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, disableArtifact: false, modelDiscovery: true,
       },
       codex: { model: null, reasoningEffort: null },
       pi: { model: null, provider: '', thinkingLevel: null, retry: { enabled: null, maxRetries: null } },

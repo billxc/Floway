@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAgentClaudeSnippet, buildAgentCodexSnippet } from '../../../src/components/api-keys/agent-setup';
+import { blankAgentSetupDraft, buildAgentClaudeSnippet, buildAgentCodexSnippet } from '../../../src/components/api-keys/agent-setup';
 
 describe('Agent Setup snippets', () => {
   it('renders selected Codex model and reasoning effort', () => {
@@ -34,6 +34,7 @@ describe('Agent Setup snippets', () => {
       optOutAiAttribution: false,
       disableAutoMemory: false,
       disableAgentView: false,
+      disableArtifact: false,
       modelDiscovery: false,
     })) as { env: Record<string, string> };
 
@@ -58,11 +59,22 @@ describe('Agent Setup snippets', () => {
       optOutAiAttribution: false,
       disableAutoMemory: false,
       disableAgentView: false,
+      disableArtifact: false,
       modelDiscovery: false,
     })) as { env: Record<string, string> };
 
     expect(snippet.env).not.toHaveProperty('ANTHROPIC_DEFAULT_FABLE_MODEL');
     expect(snippet.env).toHaveProperty('ANTHROPIC_DEFAULT_OPUS_MODEL', 'opus-5');
+  });
+
+  it.each([false, true])('renders the Artifact opt-out only when selected: %s', disableArtifact => {
+    const settings = { ...blankAgentSetupDraft().claudeCode, disableArtifact };
+    const snippet = JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', settings));
+
+    if (disableArtifact) expect(snippet).toHaveProperty('enableArtifact', false);
+    else expect(snippet).not.toHaveProperty('enableArtifact');
+    expect(snippet).not.toHaveProperty('disableArtifact');
+    expect(snippet.env).toMatchObject({ ANTHROPIC_BASE_URL: 'https://floway.example', ANTHROPIC_AUTH_TOKEN: 'key' });
   });
 
   it('renders optional Claude cleanup and attribution preferences', () => {
@@ -77,6 +89,7 @@ describe('Agent Setup snippets', () => {
       optOutAiAttribution: false,
       disableAutoMemory: false,
       disableAgentView: false,
+      disableArtifact: false,
       modelDiscovery: true,
     } as const;
 
@@ -91,6 +104,7 @@ describe('Agent Setup snippets', () => {
       optOutAiAttribution: true,
       disableAutoMemory: false,
       disableAgentView: false,
+      disableArtifact: false,
     }))).toMatchObject({
       cleanupPeriodDays: 365,
       attribution: { commit: '', pr: '', sessionUrl: false },
