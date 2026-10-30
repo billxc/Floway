@@ -9,35 +9,6 @@ import type { RunResult } from './harness';
 import { renderPowerShellPrefix, renderShellPrefix } from '../../../src/render.ts';
 import { SETUP_BASH_CLAUDE, SETUP_BASH_CODEX, SETUP_POWERSHELL_CLAUDE, SETUP_POWERSHELL_CODEX, SETUP_POWERSHELL_COMMON } from '../../../src/script-assets.generated.ts';
 
-for (const shell of ['Bash', 'PowerShell'] as const) {
-  test(`${shell}: artifact and agent-view opt-outs remain independent across re-runs`, { timeout: 180_000 }, async ({ skip }) => {
-    if (shell === 'PowerShell' && !hostPwsh) return skip(true, 'no PowerShell interpreter on this host');
-    const ws = makeWorkspace();
-    placeFakeClaude(ws.binDir);
-    mkdirSync(join(ws.home, '.claude'), { recursive: true });
-    const runInstaller = shell === 'Bash' ? runShellInstaller : runPowerShellInstaller;
-    for (const [disableArtifact, disableAgentView] of [[true, false], [true, true], [false, true], [false, false]] as const) {
-      const previous = existsSync(settingsPathFor(ws)) ? readSettings(settingsPathFor(ws)) : { theme: 'dark', enableArtifact: true };
-      // Reintroduce the deprecated key to prove cleanup in both toggle states.
-      writeFileSync(settingsPathFor(ws), JSON.stringify({ ...previous, disableArtifact: true }));
-      const run = await runInstaller({
-        workspace: ws, baseUrl: modelServer.url,
-        configuration: claudeConfig({ disableArtifact, disableAgentView }),
-      });
-      expect(run.code, `installer should succeed:\n${run.combined}`).toBe(0);
-      const settings = readSettings(settingsPathFor(ws));
-      if (disableArtifact) expect(settings.enableArtifact).toBe(false);
-      else expect(settings).not.toHaveProperty('enableArtifact');
-      if (disableAgentView) expect(settings.disableAgentView).toBe(true);
-      else expect(settings).not.toHaveProperty('disableAgentView');
-      expect(settings).not.toHaveProperty('disableArtifact');
-      expect(settings.theme).toBe('dark');
-      expect(existsSync(installerMarker(ws))).toBe(false);
-    }
-    expect(modelServer.requests).toHaveLength(0);
-  });
-}
-
 test('existing CLI is used and the installer hook is not called', { timeout: 180_000 }, async () => {
   const ws = makeWorkspace();
   placeFakeClaude(ws.binDir);

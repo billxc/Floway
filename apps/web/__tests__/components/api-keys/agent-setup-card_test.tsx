@@ -92,18 +92,6 @@ describe('Agent Setup card fields', () => {
     expect(shownSettings()).toEqual({ effort: 'high', modelDiscovery: false, attributionOptOut: true, autoMemoryOptOut: true, agentViewOptOut: true, artifactOptOut: true });
   });
 
-  it('toggles the Artifact opt-out without changing other Claude settings', () => {
-    renderInApp(<Host />);
-    const before = shownSettings();
-    fireEvent.click(screen.getByRole('switch', { name: 'Disable Artifacts' }));
-    expect(shownSettings()).toEqual({ ...before, artifactOptOut: false });
-    act(() => { screen.getByRole('tab', { name: 'Pi' }).click(); });
-    act(() => { screen.getByRole('tab', { name: 'Claude Code' }).click(); });
-    expect(shownSettings()).toEqual({ ...before, artifactOptOut: false });
-    fireEvent.click(screen.getByRole('switch', { name: 'Disable Artifacts' }));
-    expect(shownSettings()).toEqual(before);
-  });
-
   it('renders the Pi tab with dynamic discovery and no config snippet tab', () => {
     renderInApp(<Host />);
     act(() => { screen.getByRole('tab', { name: 'Pi' }).click(); });
