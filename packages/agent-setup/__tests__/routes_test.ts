@@ -156,7 +156,7 @@ interface LeaseResponse {
 // (leaseProjection and restore both parse the stored JSON through the schema).
 const FULL_CONFIG_JSON = (apiKeyId: string): string => JSON.stringify({
   apiKeyId,
-  claudeCode: { model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null, defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, modelDiscovery: true },
+  claudeCode: { model: null, defaultFableModel: null, defaultOpusModel: null, defaultSonnetModel: null, defaultHaikuModel: null, effortLevel: null, cleanupPeriodDays: null, optOutAiAttribution: false, disableAutoMemory: false, disableAgentView: false, disableArtifact: false, modelDiscovery: true },
   codex: { model: null, reasoningEffort: null },
   pi: { model: null, provider: 'floway', thinkingLevel: null, retry: { enabled: null, maxRetries: null } },
   omp: { model: null, provider: 'floway', retry: { enabled: null, maxRetries: null } },
@@ -240,11 +240,15 @@ test('POST returns no-selectable-key when the account has no key', async () => {
 test('POST restores the latest saved configuration whose key is still selectable', async () => {
   const h = harness();
   const first = await create(h);
-  const edited = { ...first.configuration, codex: { ...first.configuration.codex, reasoningEffort: 'high' } };
-  await h.request('/api/setup', putJson({ token: first.token, configuration: edited, expectedRevision: first.configurationRevision }));
+  const { disableArtifact: _, ...claudeCode } = first.configuration.claudeCode;
+  const edited = { ...first.configuration, claudeCode, codex: { ...first.configuration.codex, reasoningEffort: 'high' } };
+  await h.repo.updateConfiguration({
+    userId: USER_ID, token: first.token, expectedRevision: first.configurationRevision,
+    configurationJson: JSON.stringify(edited), now: Date.now(), expiresAt: Date.now() + 300_000,
+  });
 
   const reopened = await create(h);
-  assertEquals(reopened.configuration.codex.reasoningEffort, 'high');
+  expect(reopened.configuration).toEqual({ ...edited, claudeCode: { ...claudeCode, disableArtifact: false } });
   // A reopen inserts a brand-new independent lease; it never reuses a token.
   expect(reopened.token).not.toBe(first.token);
   assertEquals(reopened.configurationRevision, 1);
