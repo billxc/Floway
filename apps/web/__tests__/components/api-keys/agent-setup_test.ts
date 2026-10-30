@@ -67,7 +67,7 @@ describe('Agent Setup snippets', () => {
     expect(snippet.env).toHaveProperty('ANTHROPIC_DEFAULT_OPUS_MODEL', 'opus-5');
   });
 
-  it('renders optional Claude cleanup and feature preferences', () => {
+  it('renders optional Claude cleanup and attribution preferences', () => {
     const base = {
       model: null,
       defaultFableModel: null,
@@ -83,25 +83,23 @@ describe('Agent Setup snippets', () => {
       modelDiscovery: true,
     } as const;
 
-    const snippet = JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', base));
-    expect(snippet).not.toHaveProperty('cleanupPeriodDays');
-    expect(snippet).not.toHaveProperty('attribution');
-    expect(snippet).not.toHaveProperty('autoMemoryEnabled');
-    expect(snippet).not.toHaveProperty('disableAgentView');
-    expect(snippet).not.toHaveProperty('enableArtifact');
+    expect(JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', base)))
+      .not.toHaveProperty('cleanupPeriodDays');
+    expect(JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', base)))
+      .not.toHaveProperty('attribution');
+    expect(JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', base)))
+      .not.toHaveProperty('enableArtifact');
 
     expect(JSON.parse(buildAgentClaudeSnippet('https://floway.example', 'key', {
       ...base,
       cleanupPeriodDays: 365,
       optOutAiAttribution: true,
-      disableAutoMemory: true,
-      disableAgentView: true,
+      disableAutoMemory: false,
+      disableAgentView: false,
       disableArtifact: true,
     }))).toMatchObject({
       cleanupPeriodDays: 365,
       attribution: { commit: '', pr: '', sessionUrl: false },
-      autoMemoryEnabled: false,
-      disableAgentView: true,
       enableArtifact: false,
     });
   });
