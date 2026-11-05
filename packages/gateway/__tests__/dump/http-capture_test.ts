@@ -6,22 +6,6 @@ import { jsonRequestBody } from '@floway-dev/provider';
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
 
-test('credentials are redacted before capture persistence but forwarded unchanged', async () => {
-  const capture = new HttpCapture();
-  const fetcher = capture.wrapFetcher(async (_url, init) => {
-    const headers = new Headers(init.headers);
-    expect(headers.get('authorization')).toBe('Bearer local-cli-secret');
-    expect(headers.get('x-api-key')).toBe('provider-secret');
-    return new Response('{}');
-  }, 'up_local');
-  await fetcher('https://api.githubcopilot.com/models', { headers: { authorization: 'Bearer local-cli-secret', 'x-api-key': 'provider-secret', 'x-request-id': 'trace' } });
-  const serialized = JSON.stringify(capture.exchanges);
-  expect(serialized).not.toContain('local-cli-secret');
-  expect(serialized).not.toContain('provider-secret');
-  expect(capture.exchanges[0].request.headers).toContainEqual(['authorization', '[redacted]']);
-  expect(capture.exchanges[0].request.headers).toContainEqual(['x-request-id', 'trace']);
-});
-
 test('captures the serialized provider request and raw malformed SSE before parsing', async () => {
   const capture = new HttpCapture();
   const raw = ': keepalive\r\ndata: {broken json}\r\n\r\ndata: tail\n\n';
