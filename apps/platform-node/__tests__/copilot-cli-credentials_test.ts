@@ -35,16 +35,17 @@ test.each([{ ...identity, host: 'tenant.ghe.com' }, { ...identity, login: 'anoth
 });
 
 test('credential travels through IPC, with stdout and stderr disabled', async () => {
-  const reader = createCopilotCliCredentialReader(configuration)!;
-  const pending = reader({ ...identity, login: 'TESTER' });
+  const emuConfiguration = JSON.stringify({ up_local: { login: 'tester_emu', runtimePath: '/installed/copilot/runtime.node' } });
+  const reader = createCopilotCliCredentialReader(emuConfiguration)!;
+  const pending = reader({ ...identity, login: 'TESTER_EMU' });
   child.emit('message', { ok: true, token: 'ipc-secret' });
   expect(await pending).toEqual({ token: 'ipc-secret' });
   const [, args, options] = fork.mock.calls[0];
-  expect(args).toEqual(['/installed/copilot/runtime.node', 'https://github.com', 'tester']);
+  expect(args).toEqual(['/installed/copilot/runtime.node', 'https://github.com', 'tester_emu']);
   expect(options.stdio).toEqual(['ignore', 'ignore', 'ignore', 'ipc']);
   expect(JSON.stringify(fork.mock.calls)).not.toContain('ipc-secret');
   expect(child.kill).toHaveBeenCalledOnce();
-  const second = reader(identity);
+  const second = reader({ ...identity, login: 'tester_emu' });
   child.emit('message', { ok: true, token: 'rotated-secret' });
   expect(await second).toEqual({ token: 'rotated-secret' });
   expect(fork).toHaveBeenCalledTimes(2);

@@ -57,7 +57,7 @@ export const createCopilotCliCredentialReader = (configuration: string | undefin
   const bindings = new Map<string, CopilotCliBinding>();
   for (const [id, value] of Object.entries(parsed)) {
     if (!id || !isRecord(value) || Object.keys(value).some(key => key !== 'login' && key !== 'runtimePath')
-      || typeof value.login !== 'string' || !/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(value.login)
+      || typeof value.login !== 'string' || !/^[a-z\d](?:[a-z\d_-]*[a-z\d])?$/i.test(value.login)
       || typeof value.runtimePath !== 'string' || !isAbsolute(value.runtimePath) || basename(value.runtimePath) !== 'runtime.node') {
       throw new Error('Each FLOWAY_COPILOT_CLI_AUTH binding requires an upstream ID, GitHub login, and absolute runtime.node path');
     }
