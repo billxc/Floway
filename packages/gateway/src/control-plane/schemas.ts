@@ -480,6 +480,11 @@ export const copilotOAuthDeviceLoginPollBody = z.object({
 
 export const copilotQuotaBody = recordOnlyBody;
 
+export const copilotCliConnectBody = z.object({
+  record: upstreamRecordEnvelope,
+  login: z.string().trim().min(1),
+});
+
 // --- codex OAuth (record-body contract) ---
 //
 // PKCE state is fully SPA-held: the dashboard mints `{verifier, challenge,

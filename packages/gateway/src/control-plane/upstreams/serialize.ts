@@ -90,7 +90,7 @@ export const upstreamRecordToJson = (upstream: UpstreamRecord): RedactedSerializ
     return {
       ...base,
       kind: 'copilot',
-      config: { githubHost: config.githubHost, user: clone(config.user), githubTokenSet: hasSecret(config.githubToken) },
+      config: { githubHost: config.githubHost, user: clone(config.user), githubTokenSet: hasSecret(config.githubToken), ...(config.credentialSource ? { credentialSource: config.credentialSource } : {}) },
       state,
     };
   }

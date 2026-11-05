@@ -1,28 +1,26 @@
 import { afterEach, expect, test, vi } from 'vitest';
 
-import { initLocalCredentialReader, readLocalCredential } from '../src/local-credential.ts';
+import { initLocalCredentialProvider, listLocalCredentialAccounts, localCredentialProviderEnabled, readLocalCredential } from '../src/local-credential.ts';
 
-const identity = { upstreamId: 'up_local', host: 'github.com', login: 'tester' };
-afterEach(() => initLocalCredentialReader(null));
+const account = { host: 'github.com', login: 'tester' };
+afterEach(() => initLocalCredentialProvider(null));
 
-test('unconfigured local credentials do not change existing authentication', async () => {
-  initLocalCredentialReader(null);
-  expect(await readLocalCredential(identity)).toBeNull();
+test('unconfigured local credential provider fails closed', async () => {
+  initLocalCredentialProvider(null);
+  expect(localCredentialProviderEnabled()).toBe(false);
+  await expect(listLocalCredentialAccounts()).rejects.toThrow('not enabled');
+  await expect(readLocalCredential(account)).rejects.toThrow('not enabled');
 });
 
-test('local credential reads preserve identity, abort signal, and original failure', async () => {
-  const failure = new Error('credential unavailable');
+test('local credential provider forwards account identity, abort signal, and fresh reads', async () => {
   const signal = new AbortController().signal;
-  const reader = vi.fn(async () => { throw failure; });
-  initLocalCredentialReader(reader);
-  await expect(readLocalCredential(identity, signal)).rejects.toBe(failure);
-  expect(reader).toHaveBeenCalledWith(identity, signal);
-});
-
-test('local credentials are read afresh instead of cached by the platform', async () => {
-  const reader = vi.fn().mockResolvedValueOnce({ token: 'first' }).mockResolvedValueOnce({ token: 'second' });
-  initLocalCredentialReader(reader);
-  expect(await readLocalCredential(identity)).toEqual({ token: 'first' });
-  expect(await readLocalCredential(identity)).toEqual({ token: 'second' });
-  expect(reader).toHaveBeenCalledTimes(2);
+  const listAccounts = vi.fn(async () => [account]);
+  const readCredential = vi.fn().mockResolvedValueOnce({ token: 'first' }).mockResolvedValueOnce({ token: 'second' });
+  initLocalCredentialProvider({ listAccounts, readCredential });
+  expect(localCredentialProviderEnabled()).toBe(true);
+  expect(await listLocalCredentialAccounts(signal)).toEqual([account]);
+  expect(listAccounts).toHaveBeenCalledWith(signal);
+  expect(await readLocalCredential(account, signal)).toEqual({ token: 'first' });
+  expect(await readLocalCredential(account, signal)).toEqual({ token: 'second' });
+  expect(readCredential).toHaveBeenCalledTimes(2);
 });

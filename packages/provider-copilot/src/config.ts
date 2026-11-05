@@ -11,6 +11,7 @@ export interface CopilotUpstreamUser {
 export interface CopilotUpstreamConfig {
   githubHost: string;
   githubToken: string;
+  credentialSource?: 'copilot-cli';
   user: CopilotUpstreamUser;
 }
 
@@ -55,14 +56,27 @@ const integerField = (value: unknown, field: string, err: FieldErrorBuilder): nu
   return value;
 };
 
-const copilotUserField = (value: unknown, err: FieldErrorBuilder): CopilotUpstreamUser => {
+const copilotUserField = (value: unknown, err: FieldErrorBuilder, requireIdentity = false): CopilotUpstreamUser => {
   if (!isRecord(value)) throw err('user', 'an object');
+  if (requireIdentity && integerField(value.id, 'user.id', err) <= 0) throw err('user.id', 'a positive integer');
   return {
-    login: stringField(value.login, 'user.login', err),
+    login: requireIdentity ? nonEmptyStringField(value.login, 'user.login', err) : stringField(value.login, 'user.login', err),
     avatar_url: stringField(value.avatar_url, 'user.avatar_url', err),
     name: nullableStringField(value.name, 'user.name', err),
     id: integerField(value.id, 'user.id', err),
   };
+};
+
+const credentialFields = (value: Record<string, unknown>, err: FieldErrorBuilder, requireToken: boolean): Pick<CopilotUpstreamConfig, 'githubToken' | 'credentialSource'> => {
+  if (value.credentialSource !== undefined && value.credentialSource !== 'copilot-cli') {
+    throw err('credentialSource', 'copilot-cli or omitted');
+  }
+  if (value.credentialSource === 'copilot-cli') {
+    if (githubHostField(value.githubHost, err) !== 'github.com') throw err('githubHost', 'github.com for Copilot CLI credentials');
+    if (stringField(value.githubToken ?? '', 'githubToken', err) !== '') throw err('githubToken', 'empty for Copilot CLI credentials');
+    return { githubToken: '', credentialSource: 'copilot-cli' };
+  }
+  return { githubToken: requireToken ? nonEmptyStringField(value.githubToken, 'githubToken', err) : stringField(value.githubToken, 'githubToken', err) };
 };
 
 // Grammar for an incoming config payload. The caller supplies the error
@@ -72,8 +86,8 @@ export const parseCopilotUpstreamConfig = (value: unknown, err: FieldErrorBuilde
   if (!isRecord(value)) throw err('config', 'an object');
   return {
     githubHost: githubHostField(value.githubHost, err),
-    githubToken: nonEmptyStringField(value.githubToken, 'githubToken', err),
-    user: copilotUserField(value.user, err),
+    ...credentialFields(value, err, true),
+    user: copilotUserField(value.user, err, value.credentialSource === 'copilot-cli'),
   };
 };
 
@@ -85,8 +99,8 @@ export const assertCopilotUpstreamRecord = (record: UpstreamRecord): CopilotUpst
     kind: 'copilot',
     config: {
       githubHost: githubHostField(record.config.githubHost, malformedConfig),
-      githubToken: stringField(record.config.githubToken, 'githubToken', malformedConfig),
-      user: copilotUserField(record.config.user, malformedConfig),
+      ...credentialFields(record.config, malformedConfig, false),
+      user: copilotUserField(record.config.user, malformedConfig, record.config.credentialSource === 'copilot-cli'),
     },
   };
 };

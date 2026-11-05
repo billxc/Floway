@@ -225,6 +225,7 @@ export interface CopilotAuth {
   githubHost: string;
   githubToken: string;
   githubLogin?: string;
+  credentialSource?: 'copilot-cli';
 }
 
 export async function copilotAuthedFetch(path: string, init: FetchInit, auth: CopilotAuth, options: CopilotFetchOptions): Promise<Response> {
@@ -234,7 +235,9 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
   // the body in an explicit owner and replace the generator parameter so the
   // final network wait cannot retain both copies after ownership transfers.
   init = { signal };
-  const local = await readLocalCredential({ upstreamId: auth.id, host: auth.githubHost, login: auth.githubLogin ?? '' }, signal);
+  const local = auth.credentialSource === 'copilot-cli'
+    ? await readLocalCredential({ host: auth.githubHost, login: auth.githubLogin ?? '' }, signal)
+    : null;
   // CLI-sourced credentials authenticate directly instead of using the VS Code exchange.
   // https://github.com/github/copilot-cli
   const entry = local === null

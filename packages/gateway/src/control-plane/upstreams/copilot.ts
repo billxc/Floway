@@ -1,25 +1,28 @@
 import { resolveControlPlaneFetcher } from './proxy-resolution.ts';
 import { upstreamErrorMessage as errorMessage } from './shared.ts';
 import { fullUpstreamActionError } from '../../access-control/upstream-edit.ts';
-import { userFromContext } from '../../middleware/auth.ts';
+import { userFromContext, type AuthedContext } from '../../middleware/auth.ts';
 import type { CtxWithJson } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
 import { getRuntimeLocation } from '../../runtime/runtime-info.ts';
-import type { copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody } from '../schemas.ts';
+import type { copilotCliConnectBody, copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody } from '../schemas.ts';
 import { isRecord } from '../shared/field-validators.ts';
 import { saveUpstream } from '../shared/save-upstreams.ts';
+import { getRuntimeKind, listLocalCredentialAccounts, localCredentialProviderEnabled, readLocalCredential } from '@floway-dev/platform';
 import type { Fetcher, UpstreamRecord } from '@floway-dev/provider';
 import {
   assertCopilotUpstreamRecord,
   clearInProcessCopilotTokenCache,
   emptyCopilotUpstreamState,
   exchangeCopilotToken,
+  fetchCopilotModels,
   fetchCopilotUsage,
   projectCopilotSeat,
   putCopilotSeat,
   type CopilotSeatEntry,
   fetchGitHubUser,
   normalizeGitHubHost,
+  parseCopilotUpstreamConfig,
   pollGitHubDeviceFlow,
   projectCopilotUsageResponse,
   putCopilotQuota,
@@ -188,15 +191,20 @@ export const copilotQuota = async (c: CtxWithJson<typeof copilotQuotaBody>) => {
   let githubHost: string;
   let githubToken: string;
   let githubLogin: string;
+  let credentialSource: CopilotUpstreamConfig['credentialSource'];
   let fetcher: Fetcher;
   try {
     const parsed = parseCopilotDraftConfig(record.config);
     githubHost = parsed.githubHost;
     const { config } = parsed;
-    if (typeof config.githubToken !== 'string' || config.githubToken === '') {
+    credentialSource = config.credentialSource === 'copilot-cli' ? 'copilot-cli' : undefined;
+    if (credentialSource === 'copilot-cli') {
+      const error = localCopilotAccessError(c);
+      if (error) return c.json({ error: error.error }, error.status);
+    } else if (typeof config.githubToken !== 'string' || config.githubToken === '') {
       return c.json({ error: 'Copilot upstream has no GitHub token' }, 400);
     }
-    githubToken = config.githubToken;
+    githubToken = typeof config.githubToken === 'string' ? config.githubToken : '';
     githubLogin = isRecord(config.user) && typeof config.user.login === 'string' ? config.user.login : '';
     fetcher = await resolveControlPlaneFetcher({ override: record.proxy_fallback_list, runtimeLocation: getRuntimeLocation(c.req.raw) });
   } catch (e: unknown) {
@@ -204,7 +212,7 @@ export const copilotQuota = async (c: CtxWithJson<typeof copilotQuotaBody>) => {
   }
 
   try {
-    const resp = await fetchCopilotUsage(githubHost, githubToken, fetcher, { upstreamId: record.id, host: githubHost, login: githubLogin });
+    const resp = await fetchCopilotUsage(githubHost, githubToken, fetcher, credentialSource === 'copilot-cli' ? githubLogin : undefined);
 
     if (!resp.ok) {
       const text = await resp.text();
@@ -237,5 +245,50 @@ export const copilotQuota = async (c: CtxWithJson<typeof copilotQuotaBody>) => {
     return c.json(snapshot);
   } catch (e: unknown) {
     return c.json({ error: errorMessage(e) }, 502);
+  }
+};
+
+export const localCopilotAccessError = (c: AuthedContext): { error: string; status: 403 | 409 } | null => {
+  if (!userFromContext(c).isAdmin) return { error: 'Admin privileges required for local Copilot credentials', status: 403 };
+  if (getRuntimeKind() !== 'node' || !localCredentialProviderEnabled()) return { error: 'Local Copilot CLI credentials are not enabled on this Node instance', status: 409 };
+  return null;
+};
+
+export const copilotCliAccounts = async (c: AuthedContext) => {
+  if (!userFromContext(c).isAdmin || getRuntimeKind() !== 'node' || !localCredentialProviderEnabled()) {
+    return c.json({ enabled: false, accounts: [] });
+  }
+  try {
+    const accounts = await listLocalCredentialAccounts(c.req.raw.signal);
+    return c.json({ enabled: true, accounts: accounts.map(account => ({ host: account.host, login: account.login })) });
+  } catch {
+    return c.json({ error: 'Unable to read the local Copilot CLI account list' }, 502);
+  }
+};
+
+export const copilotCliConnect = async (c: CtxWithJson<typeof copilotCliConnectBody>) => {
+  const accessError = localCopilotAccessError(c);
+  if (accessError) return c.json({ error: accessError.error }, accessError.status);
+  const { record, login } = c.req.valid('json');
+  const editError = await fullUpstreamActionError(userFromContext(c), record.id);
+  if (editError) return c.json({ error: editError.error }, editError.status);
+  if (record.kind !== 'copilot') return c.json({ error: 'Upstream is not a Copilot upstream' }, 400);
+  const signal = c.req.raw.signal;
+  try {
+    const fetcher = await resolveControlPlaneFetcher({ override: record.proxy_fallback_list, runtimeLocation: getRuntimeLocation(c.req.raw) });
+    const accounts = await listLocalCredentialAccounts(signal);
+    const account = accounts.find(value => value.host === 'github.com' && value.login.toLowerCase() === login.toLowerCase());
+    if (account === undefined) throw new Error('Selected Copilot CLI account is not signed in locally');
+    const credential = await readLocalCredential(account, signal);
+    const user = await fetchGitHubUser('github.com', credential.token, (url, init) => fetcher(url, { ...init, redirect: 'error', signal }));
+    const config = parseCopilotUpstreamConfig({ githubHost: 'github.com', githubToken: '', credentialSource: 'copilot-cli', user }, () => new Error('GitHub returned an invalid account identity'));
+    if (config.user.login.toLowerCase() !== account.login.toLowerCase()) throw new Error('Copilot CLI credential belongs to a different GitHub account');
+    const catalog = await fetchCopilotModels({ id: record.id || 'copilot-cli-draft', githubHost: 'github.com', githubToken: '', githubLogin: config.user.login, credentialSource: 'copilot-cli' }, (url, init) => fetcher(url, { ...init, signal }));
+    return c.json({
+      patch: { config, state: emptyCopilotUpstreamState() },
+      models: catalog.data.map(model => ({ id: model.id, name: model.display_name ?? model.name ?? model.id })),
+    });
+  } catch (error) {
+    return c.json({ error: errorMessage(error) }, 502);
   }
 };

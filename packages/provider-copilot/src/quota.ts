@@ -31,7 +31,7 @@ import { githubApiOrigin } from './github-host.ts';
 import { resolveCopilotQuotaUnlimited } from './quota-entitlement.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
 import { copilotMetrics } from './upstream-metrics.ts';
-import { readLocalCredential, type LocalCredentialIdentity } from '@floway-dev/platform';
+import { readLocalCredential } from '@floway-dev/platform';
 import { recordUpstreamMetrics, getProviderRepo, type Fetcher } from '@floway-dev/provider';
 
 // One quota bucket. A seat reports three kinds of bucket and both sources spell
@@ -290,8 +290,8 @@ export const putCopilotSeat = async (upstreamId: string, seat: CopilotSeat): Pro
   } satisfies CopilotUpstreamState));
 };
 
-export const fetchCopilotUsage = async (githubHost: string, githubToken: string, fetcher: Fetcher, identity?: LocalCredentialIdentity): Promise<Response> => {
-  const local = identity === undefined ? null : await readLocalCredential(identity);
+export const fetchCopilotUsage = async (githubHost: string, githubToken: string, fetcher: Fetcher, cliLogin?: string): Promise<Response> => {
+  const local = cliLogin === undefined ? null : await readLocalCredential({ host: githubHost, login: cliLogin });
   return await fetcher(`${githubApiOrigin(githubHost)}/copilot_internal/user`, { headers: githubHeaders(local?.token ?? githubToken), ...(local !== null ? { redirect: 'error' as const } : {}) });
 };
 

@@ -1,5 +1,4 @@
-export interface LocalCredentialIdentity {
-  readonly upstreamId: string;
+export interface LocalCredentialAccount {
   readonly host: string;
   readonly login: string;
 }
@@ -8,15 +7,25 @@ export interface LocalCredential {
   readonly token: string;
 }
 
-export type LocalCredentialReader = (identity: LocalCredentialIdentity, signal?: AbortSignal) => Promise<LocalCredential | null>;
+export interface LocalCredentialProvider {
+  listAccounts(signal?: AbortSignal): Promise<readonly LocalCredentialAccount[]>;
+  readCredential(account: LocalCredentialAccount, signal?: AbortSignal): Promise<LocalCredential>;
+}
 
-let reader: LocalCredentialReader | null = null;
+let provider: LocalCredentialProvider | null = null;
 
-export const initLocalCredentialReader = (value: LocalCredentialReader | null): void => {
-  reader = value;
+export const initLocalCredentialProvider = (value: LocalCredentialProvider | null): void => {
+  provider = value;
 };
 
-// Null means the operator did not opt this upstream into a local source.
-// A configured source must throw on failure rather than fall back to stored credentials.
-export const readLocalCredential = async (identity: LocalCredentialIdentity, signal?: AbortSignal): Promise<LocalCredential | null> =>
-  reader === null ? null : await reader(identity, signal);
+export const localCredentialProviderEnabled = (): boolean => provider !== null;
+
+export const listLocalCredentialAccounts = async (signal?: AbortSignal): Promise<readonly LocalCredentialAccount[]> => {
+  if (provider === null) throw new Error('Local Copilot CLI credentials are not enabled on this runtime');
+  return await provider.listAccounts(signal);
+};
+
+export const readLocalCredential = async (account: LocalCredentialAccount, signal?: AbortSignal): Promise<LocalCredential> => {
+  if (provider === null) throw new Error('Local Copilot CLI credentials are not enabled on this runtime');
+  return await provider.readCredential(account, signal);
+};

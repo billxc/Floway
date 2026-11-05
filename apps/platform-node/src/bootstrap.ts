@@ -1,4 +1,4 @@
-import { createCopilotCliCredentialReader } from './copilot-cli-credentials.ts';
+import { createCopilotCliCredentialProvider } from './copilot-cli-credentials.ts';
 import { EventTargetChannelBroker } from './event-target-channel-broker.ts';
 import { createNodeExternalResourceFetcher } from './external-resource-fetcher.ts';
 import { nodeFetch } from './fetch.ts';
@@ -21,7 +21,7 @@ import {
   initFileStore,
   initImageCacheStore,
   initImageProcessor,
-  initLocalCredentialReader,
+  initLocalCredentialProvider,
   initRuntimeKind,
   initSocketDial,
   initTimingSafeEqual,
@@ -31,7 +31,7 @@ import {
 export const bootstrapNodePlatform = (): { db: SqlDatabase } => {
   initEnv(name => process.env[name]);
   initRuntimeKind('node');
-  initLocalCredentialReader(createCopilotCliCredentialReader(process.env.FLOWAY_COPILOT_CLI_AUTH));
+  initLocalCredentialProvider(createCopilotCliCredentialProvider(process.env.FLOWAY_COPILOT_CLI_RUNTIME_PATH));
   initTimingSafeEqual(timingSafeEqual);
   initExternalResourceFetcher(createNodeExternalResourceFetcher());
   initFetch(nodeFetch, nodeHttpContentDecoders);

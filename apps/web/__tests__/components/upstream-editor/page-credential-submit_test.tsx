@@ -33,15 +33,19 @@ const imported = {
   },
 };
 
+const cliImported = { config: { githubHost: 'github.com', githubToken: '', credentialSource: 'copilot-cli' as const, user: { login: 'local-user', id: 123, name: 'Local User', avatar_url: '' } }, state: null };
+
 vi.mock('../../../src/components/upstream-editor/config-sidebar', () => ({
   UpstreamConfigSidebar: ({ onPatch, record }: {
-    onPatch: (patch: typeof imported, persisted: boolean) => void;
+    onPatch: (patch: { config?: unknown; state?: unknown }, persisted: boolean) => void;
     record: UpstreamRecord;
   }) => {
-    const { setValue } = useFormContext<UpstreamEditorValues>();
+    const { setValue, formState } = useFormContext<UpstreamEditorValues>();
+    const patch = record.kind === 'copilot' ? cliImported : imported;
     return <>
-      <button type="button" onClick={() => onPatch(imported, record.id !== '')}>Import credential</button>
-      <button type="button" onClick={() => setValue('config', imported.config, { shouldDirty: true })}>Edit credential draft</button>
+      <button type="button" onClick={() => onPatch(patch, record.id !== '')}>Import credential</button>
+      <button type="button" onClick={() => setValue('config', patch.config, { shouldDirty: true })}>Edit credential draft</button>
+      {formState.errors.config?.message && <div>{i18n.t(String(formState.errors.config.message))}</div>}
     </>;
   },
 }));
@@ -66,6 +70,23 @@ const renderPage = (record: UpstreamRecord, mode: 'create' | 'edit') => {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.create.mockResolvedValue({ data: { ...blueprint, id: 'up_codex', ...imported }, error: null });
+});
+
+test('creating a Copilot CLI upstream saves only the credential source and identity', async () => {
+  const local = upstreamRecord('', { kind: 'copilot', config: { githubHost: 'github.com', githubToken: '', user: { login: '', id: 0, name: null, avatar_url: '' } }, state: null });
+  apiMocks.create.mockResolvedValue({ data: { ...local, id: 'up_local', ...cliImported } });
+  renderPage(local, 'create');
+  fireEvent.click(screen.getByRole('button', { name: 'Import credential' }));
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.actions.save') }));
+  await waitFor(() => expect(apiMocks.create).toHaveBeenCalledWith({ json: expect.objectContaining({ kind: 'copilot', config: cliImported.config, state: null }) }));
+});
+
+test('an unverified Copilot CLI account cannot be saved', async () => {
+  const local = upstreamRecord('', { kind: 'copilot', config: { githubHost: 'github.com', githubToken: '', credentialSource: 'copilot-cli', user: { login: '', id: 0, name: null, avatar_url: '' } }, state: null });
+  renderPage(local, 'create');
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.actions.save') }));
+  expect(await screen.findByText(i18n.t('dashboard.upstreamEditor.copilot.local.verifyRequired'))).toBeTruthy();
+  expect(apiMocks.create).not.toHaveBeenCalled();
 });
 
 test('creating a Codex upstream saves the imported credential', async () => {

@@ -11,6 +11,7 @@ export {
   clearInProcessCopilotTokenCache,
   exchangeCopilotToken,
 } from './auth.ts';
+export { fetchCopilotModels } from './fetch-models.ts';
 export { fetchGitHubUser, pollGitHubDeviceFlow, startGitHubDeviceFlow } from './github-device-flow.ts';
 export { normalizeGitHubHost } from './github-host.ts';
 export { pricingForCopilotPublicModelId } from './pricing.ts';

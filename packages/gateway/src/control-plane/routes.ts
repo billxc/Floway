@@ -11,7 +11,7 @@ import { createAlias, deleteAlias, listAliases, updateAlias } from './model-alia
 import { controlPlaneModels } from './models/routes.ts';
 import { performanceOverview } from './performance/routes.ts';
 import { createProxy, deleteProxy, listAllBackoffs, listProxies, listProxyBackoffs, listProxyOptions, resetProxyBackoffs, testProxy, updateProxy } from './proxies/routes.ts';
-import { accessRecordBody, upstreamMetricsQuery, upstreamOptionsQuery, authLoginBody, changeOwnPasswordBody, updateOwnPreferencesBody, claudeCodeOAuthAuthorizeUrlBody, claudeCodeOAuthExchangeBody, claudeCodeOAuthRefreshBody, claudeCodeProbeBody, claudeCodeSetupTokenAuthorizeUrlBody, claudeCodeSetupTokenExchangeBody, codexImportExchangeBody, codexImportPreviewBody, codexOAuthAuthorizeUrlBody, codexOAuthRefreshBody, codexRateLimitResetConsumeBody, codexRateLimitResetCreditsBody, copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody, createAliasBody, createGroupBody, createKeyBody, createProxyBody, createUpstreamBody, createUserBody, exportQuery, importBody, modelsQuery, ollamaUsageBody, performanceQuery, previewModelsBody, proxyOptionsQuery, resetBackoffBody, reorderAccessRecordsBody, reorderUpstreamsBody, resolveAccessBody, rotateKeyBody, siteSettingsBody, testProxyBody, tokenUsageOverviewQuery, tokenUsageQuery, updateAliasBody, updateGroupBody, updateKeyBody, updateProxyBody, updateUpstreamBody, updateUserBody, webSearchConfigSchema, webSearchUsageQuery } from './schemas.ts';
+import { accessRecordBody, upstreamMetricsQuery, upstreamOptionsQuery, authLoginBody, changeOwnPasswordBody, updateOwnPreferencesBody, claudeCodeOAuthAuthorizeUrlBody, claudeCodeOAuthExchangeBody, claudeCodeOAuthRefreshBody, claudeCodeProbeBody, claudeCodeSetupTokenAuthorizeUrlBody, claudeCodeSetupTokenExchangeBody, codexImportExchangeBody, codexImportPreviewBody, codexOAuthAuthorizeUrlBody, codexOAuthRefreshBody, codexRateLimitResetConsumeBody, codexRateLimitResetCreditsBody, copilotCliConnectBody, copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody, createAliasBody, createGroupBody, createKeyBody, createProxyBody, createUpstreamBody, createUserBody, exportQuery, importBody, modelsQuery, ollamaUsageBody, performanceQuery, previewModelsBody, proxyOptionsQuery, resetBackoffBody, reorderAccessRecordsBody, reorderUpstreamsBody, resolveAccessBody, rotateKeyBody, siteSettingsBody, testProxyBody, tokenUsageOverviewQuery, tokenUsageQuery, updateAliasBody, updateGroupBody, updateKeyBody, updateProxyBody, updateUpstreamBody, updateUserBody, webSearchConfigSchema, webSearchUsageQuery } from './schemas.ts';
 import { getWebSearchConfigRoute, putWebSearchConfigRoute, testWebSearchConfigRoute } from './search-config/routes.ts';
 import { webSearchUsage } from './search-usage/routes.ts';
 import { getSiteSettings, putSiteSettings } from './site-settings/routes.ts';
@@ -20,7 +20,7 @@ import { tokenUsage } from './token-usage/routes.ts';
 import { upstreamMetrics } from './upstream-metrics/routes.ts';
 import { claudeCodeOAuthAuthorizeUrl, claudeCodeOAuthExchange, claudeCodeOAuthRefresh, claudeCodeProbe, claudeCodeSetupTokenAuthorizeUrl, claudeCodeSetupTokenExchange } from './upstreams/claude-code.ts';
 import { codexImportExchange, codexImportPreview, codexOAuthAuthorizeUrl, codexOAuthRefresh, codexRateLimitResetConsume, codexRateLimitResetCredits } from './upstreams/codex.ts';
-import { copilotOAuthDeviceLoginPoll, copilotOAuthDeviceLoginStart, copilotQuota } from './upstreams/copilot.ts';
+import { copilotCliAccounts, copilotCliConnect, copilotOAuthDeviceLoginPoll, copilotOAuthDeviceLoginStart, copilotQuota } from './upstreams/copilot.ts';
 import { fetchSavedModels, previewModels } from './upstreams/models.ts';
 import { ollamaUsage } from './upstreams/ollama.ts';
 import { createUpstream, deleteUpstream, getUpstream, getUpstreamBlueprint, listUpstreamOptions, listUpstreams, reorderUpstreams, updateUpstream } from './upstreams/routes.ts';
@@ -72,6 +72,8 @@ export const controlPlaneRoutes = new Hono<{ Variables: AuthVars }>()
   .post('/api/upstreams/copilot/oauth/device-login/start', zValidator('json', copilotOAuthDeviceLoginStartBody), copilotOAuthDeviceLoginStart)
   .post('/api/upstreams/copilot/oauth/device-login/poll', zValidator('json', copilotOAuthDeviceLoginPollBody), copilotOAuthDeviceLoginPoll)
   .post('/api/upstreams/copilot/quota', zValidator('json', copilotQuotaBody), copilotQuota)
+  .get('/api/upstreams/copilot/local/accounts', copilotCliAccounts)
+  .post('/api/upstreams/copilot/local/connect', zValidator('json', copilotCliConnectBody), copilotCliConnect)
   .post('/api/upstreams/codex/import/preview', zValidator('json', codexImportPreviewBody), codexImportPreview)
   .post('/api/upstreams/preview-models', zValidator('json', previewModelsBody), previewModels)
   .post('/api/upstreams/codex/import/exchange', zValidator('json', codexImportExchangeBody), codexImportExchange)

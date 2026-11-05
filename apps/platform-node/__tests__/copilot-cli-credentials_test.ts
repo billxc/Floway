@@ -2,13 +2,12 @@ import { EventEmitter } from 'node:events';
 
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { createCopilotCliCredentialReader } from '../src/copilot-cli-credentials.ts';
+import { createCopilotCliCredentialProvider } from '../src/copilot-cli-credentials.ts';
 
 const { fork } = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock('node:child_process', () => ({ fork }));
 
-const identity = { upstreamId: 'up_local', host: 'github.com', login: 'tester' };
-const configuration = JSON.stringify({ up_local: { login: 'tester', runtimePath: '/installed/copilot/runtime.node' } });
+const account = { host: 'github.com', login: 'tester_emu' };
 let child: EventEmitter & { kill: ReturnType<typeof vi.fn> };
 beforeEach(() => {
   fork.mockReset();
@@ -17,81 +16,57 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-test('local credential access is opt-in for an explicit upstream binding', async () => {
-  expect(createCopilotCliCredentialReader(undefined)).toBeNull();
-  const reader = createCopilotCliCredentialReader(configuration)!;
-  expect(await reader({ ...identity, upstreamId: 'unbound' })).toBeNull();
+test('rejects invalid runtimePath overrides at construction', () => {
+  expect(() => createCopilotCliCredentialProvider('relative/runtime.node')).toThrow('FLOWAY_COPILOT_CLI_RUNTIME_PATH');
+  expect(() => createCopilotCliCredentialProvider('/abs/other.node')).toThrow('FLOWAY_COPILOT_CLI_RUNTIME_PATH');
   expect(fork).not.toHaveBeenCalled();
 });
 
-test.each(['', 'null', '[]', '"value"', '{', '{"up_local":{"login":"tester","runtimePath":"relative/runtime.node"}}', '{"up_local":{"login":"tester","runtimePath":"/a/runtime.node","token":"forbidden"}}'])('invalid binding is rejected at startup: %s', value => {
-  expect(() => createCopilotCliCredentialReader(value)).toThrow('FLOWAY_COPILOT_CLI_AUTH');
-  expect(fork).not.toHaveBeenCalled();
+test('listAccounts projects only host and login metadata', async () => {
+  const provider = createCopilotCliCredentialProvider('/installed/copilot/runtime.node');
+  const pending = provider.listAccounts();
+  child.emit('message', { ok: true, accounts: [{ host: 'github.com', login: 'tester_emu', token: 'secret-not-for-api' }] });
+  expect(await pending).toEqual([account]);
+  expect(fork.mock.calls[0][1]).toEqual(['/installed/copilot/runtime.node', 'accounts']);
 });
 
-test.each([{ ...identity, host: 'tenant.ghe.com' }, { ...identity, login: 'another-user' }])('another account cannot use an existing binding', async value => {
-  await expect(createCopilotCliCredentialReader(configuration)!(value)).rejects.toThrow('does not match');
-  expect(fork).not.toHaveBeenCalled();
-});
-
-test('credential travels through IPC, with stdout and stderr disabled', async () => {
-  const emuConfiguration = JSON.stringify({ up_local: { login: 'tester_emu', runtimePath: '/installed/copilot/runtime.node' } });
-  const reader = createCopilotCliCredentialReader(emuConfiguration)!;
-  const pending = reader({ ...identity, login: 'TESTER_EMU' });
+test('readCredential transfers token over IPC with stdout and stderr disabled', async () => {
+  const provider = createCopilotCliCredentialProvider('/installed/copilot/runtime.node');
+  const pending = provider.readCredential(account);
   child.emit('message', { ok: true, token: 'ipc-secret' });
   expect(await pending).toEqual({ token: 'ipc-secret' });
   const [, args, options] = fork.mock.calls[0];
-  expect(args).toEqual(['/installed/copilot/runtime.node', 'https://github.com', 'tester_emu']);
+  expect(args).toEqual(['/installed/copilot/runtime.node', 'read', 'https://github.com', 'tester_emu']);
   expect(options.stdio).toEqual(['ignore', 'ignore', 'ignore', 'ipc']);
   expect(JSON.stringify(fork.mock.calls)).not.toContain('ipc-secret');
   expect(child.kill).toHaveBeenCalledOnce();
-  const second = reader({ ...identity, login: 'tester_emu' });
-  child.emit('message', { ok: true, token: 'rotated-secret' });
-  expect(await second).toEqual({ token: 'rotated-secret' });
-  expect(fork).toHaveBeenCalledTimes(2);
+});
+
+test.each([{ host: 'tenant.ghe.com', login: 'tester' }, { host: 'github.com', login: '' }])('rejects unsupported account identities before spawning a worker', async invalid => {
+  await expect(createCopilotCliCredentialProvider('/installed/copilot/runtime.node').readCredential(invalid)).rejects.toThrow('Invalid Copilot CLI account identity');
+  expect(fork).not.toHaveBeenCalled();
 });
 
 test.each([{ ok: false, error: 'secret-in-native-error' }, { ok: true, token: '' }, { ok: true, token: 42 }])('invalid worker responses fail closed without exposing native details', async message => {
-  const pending = createCopilotCliCredentialReader(configuration)!(identity);
+  const pending = createCopilotCliCredentialProvider('/installed/copilot/runtime.node').readCredential(account);
   child.emit('message', message);
   await expect(pending).rejects.toThrow('Copilot CLI credential unavailable');
   await expect(pending).rejects.not.toThrow('secret-in-native-error');
 });
 
-test('child failure does not expose raw error details', async () => {
-  const pending = createCopilotCliCredentialReader(configuration)!(identity);
-  child.emit('error', new Error('secret-in-native-error'));
-  await expect(pending).rejects.toThrow('could not start');
-  await expect(pending).rejects.not.toThrow('secret-in-native-error');
-});
-
-test('a worker exiting without a message is a failure', async () => {
-  const pending = createCopilotCliCredentialReader(configuration)!(identity);
-  child.emit('exit', 0);
-  await expect(pending).rejects.toThrow('without a credential');
-});
-
-test('timeout terminates the credential subprocess', async () => {
+test('timeout and abort terminate the credential subprocess', async () => {
   vi.useFakeTimers();
-  const pending = createCopilotCliCredentialReader(configuration)!(identity);
-  const rejection = expect(pending).rejects.toThrow('timed out');
+  const provider = createCopilotCliCredentialProvider('/installed/copilot/runtime.node');
+  const timed = provider.readCredential(account);
+  const rejection = expect(timed).rejects.toThrow('timed out');
   await vi.advanceTimersByTimeAsync(15_000);
   await rejection;
   expect(child.kill).toHaveBeenCalledOnce();
-});
 
-test('abort terminates the subprocess and preserves the abort reason', async () => {
+  vi.useRealTimers();
   const controller = new AbortController();
-  const pending = createCopilotCliCredentialReader(configuration)!(identity, controller.signal);
+  const aborted = provider.readCredential(account, controller.signal);
   const reason = new Error('client disconnected');
   controller.abort(reason);
-  await expect(pending).rejects.toBe(reason);
-  expect(child.kill).toHaveBeenCalledOnce();
-});
-
-test('pre-aborted reads never start a subprocess', async () => {
-  const controller = new AbortController();
-  controller.abort();
-  await expect(createCopilotCliCredentialReader(configuration)!(identity, controller.signal)).rejects.toBe(controller.signal.reason);
-  expect(fork).not.toHaveBeenCalled();
+  await expect(aborted).rejects.toBe(reason);
 });

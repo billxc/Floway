@@ -1,0 +1,5 @@
+{
+  "loggedInUsers": [
+    { "kind": "githubDotCom", "host": "https://github.com", "login": "tester" }
+  ]
+}

@@ -318,6 +318,84 @@ function ReadyToSaveHint({ kind }: { kind: UpstreamProviderKind }) {
   </OutcomeMessageBar>;
 }
 
+function CopilotCliConnect({ record, readOnly, onPatch }: {
+  record: Extract<UpstreamRecord, { kind: 'copilot' }>;
+  readOnly: boolean;
+  onPatch: (patch: { config?: unknown; state?: unknown }, persisted?: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const values = useWatch<UpstreamEditorValues>();
+  const config = values.config as typeof record.config;
+  const [accounts, setAccounts] = useState<Array<{ host: string; login: string }> | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [selected, setSelected] = useState(config.user.login);
+  const [error, setError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [models, setModels] = useState<Array<{ id: string; name: string }> | null>(null);
+  const connection = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (readOnly) return;
+    const controller = new AbortController();
+    void (async () => {
+      const result = await callApi(() => api.api.upstreams.copilot.local.accounts.$get({}, { init: { signal: controller.signal } }));
+      if (controller.signal.aborted) return;
+      if (result.error) { setError(result.error.message); return; }
+      setEnabled(result.data.enabled);
+      setAccounts(result.data.accounts);
+    })();
+    return () => controller.abort();
+  }, [readOnly]);
+  useEffect(() => () => connection.current?.abort(), []);
+
+  const connect = async () => {
+    connection.current?.abort();
+    const controller = new AbortController();
+    connection.current = controller;
+    setConnecting(true); setError(null); setModels(null);
+    const result = await callApi(() => api.api.upstreams.copilot.local.connect.$post({
+      json: { record: previewRecord(record, values as UpstreamEditorValues), login: selected },
+    }, { init: { signal: controller.signal } }));
+    if (controller.signal.aborted) return;
+    setConnecting(false);
+    if (result.error) { setError(result.error.message); return; }
+    setModels(result.data.models);
+    onPatch(result.data.patch);
+  };
+
+  if (readOnly) return null;
+  return <div className="grid gap-3">
+    <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.copilot.local.description')}</Text>
+    {error && <OutcomeMessageBar onDismiss={() => setError(null)}>{error}</OutcomeMessageBar>}
+    {enabled === false && <OutcomeMessageBar intent="info">{t('dashboard.upstreamEditor.copilot.local.disabled')}</OutcomeMessageBar>}
+    {enabled === true && accounts?.length === 0 && <OutcomeMessageBar intent="info">{t('dashboard.upstreamEditor.copilot.local.empty')}</OutcomeMessageBar>}
+    <Field label={t('dashboard.upstreamEditor.copilot.local.account')}>
+      <Dropdown
+        value={selected}
+        selectedOptions={selected ? [selected] : []}
+        disabled={!enabled || connecting || !accounts?.length}
+        placeholder={t('dashboard.upstreamEditor.copilot.local.select')}
+        onOptionSelect={(_, data) => {
+          if (!data.optionValue || data.optionValue === selected) return;
+          connection.current?.abort();
+          setSelected(data.optionValue); setModels(null); setError(null);
+          onPatch({ config: { ...config, githubToken: '', credentialSource: 'copilot-cli', user: { login: '', id: 0, name: null, avatar_url: '' } }, state: null });
+        }}
+      >
+        {accounts?.map(account => <Option key={`${account.host}/${account.login}`} value={account.login}>{account.login}</Option>)}
+      </Dropdown>
+    </Field>
+    {accounts === null && enabled !== false && !error && <Spinner size="tiny" label={t('dashboard.upstreamEditor.copilot.local.loading')} labelPosition="after" />}
+    <Button appearance="primary" disabled={!enabled || !selected || connecting || !accounts?.some(account => account.login === selected)} icon={connecting ? <Spinner size="tiny" /> : <PlugConnectedRegular />} onClick={() => void connect()}>
+      {t('dashboard.upstreamEditor.copilot.local.connect')}
+    </Button>
+    {models !== null && <div className="grid gap-1">
+      <Text>{t('dashboard.upstreamEditor.copilot.local.models', { count: models.length })}</Text>
+      <Text size={200} className="font-mono text-fui-fg2">{models.slice(0, 5).map(model => model.id).join(', ')}</Text>
+    </div>}
+  </div>;
+}
+
 function CopilotConfig({ onPatch, readOnly, record }: {
   readOnly: boolean;
   record: Extract<UpstreamRecord, { kind: 'copilot' }>;
@@ -335,13 +413,15 @@ function CopilotConfig({ onPatch, readOnly, record }: {
   // A tick that has already fired holds no timer id, so clearing the timer
   // cannot end the loop on its own; the recursion reads this after every await.
   const cancelled = useRef(false);
+  const generation = useRef(0);
   const stop = () => { if (timer.current !== null) window.clearTimeout(timer.current); timer.current = null; };
 
   const poll = async (deviceCode: string, interval: number, secondsLeft: number) => {
+    const operation = generation.current;
     const result = await callApi(() => api.api.upstreams.copilot.oauth['device-login'].poll.$post({
       json: { record: previewRecord(record, values as UpstreamEditorValues), deviceCode },
     }));
-    if (cancelled.current) return;
+    if (cancelled.current || operation !== generation.current) return;
     if (result.error) {
       // Only a reply that says nothing about the device code is worth
       // repeating; any other status carries GitHub's verdict on the code, and
@@ -378,17 +458,39 @@ function CopilotConfig({ onPatch, readOnly, record }: {
   }, [flow]);
 
   const start = async () => {
-    stop(); setBusy(true); setError(null);
+    stop(); generation.current += 1; setBusy(true); setError(null);
+    const operation = generation.current;
     const result = await callApi(() => api.api.upstreams.copilot.oauth['device-login'].start.$post({
       json: { record: previewRecord(record, values as UpstreamEditorValues) },
     }));
-    if (cancelled.current) return;
+    if (cancelled.current || operation !== generation.current) return;
     if (result.error) { setBusy(false); setError(result.error.message); return; }
     setFlow(result.data);
   };
 
+  const source = config.credentialSource ?? 'device-flow';
   return <div className="grid gap-3">
-    <Field label={{ children: infoLabelSlot(t('dashboard.upstreamEditor.copilot.githubHost'), t('dashboard.upstreamEditor.copilot.githubHostHint')) }}>
+    <Field label={t('dashboard.upstreamEditor.copilot.credentialSource')}>
+      <Dropdown readOnly={readOnly || isPersisted(record)} value={t(source === 'copilot-cli' ? 'dashboard.upstreamEditor.copilot.local.method' : 'dashboard.upstreamEditor.copilot.deviceMethod')} selectedOptions={[source]} onOptionSelect={(_, data) => {
+        const next = data.optionValue;
+        if ((next !== 'copilot-cli' && next !== 'device-flow') || next === source) return;
+        generation.current += 1; stop(); setFlow(null); setBusy(false); setError(null);
+        onPatch({
+          config: {
+            githubHost: next === 'copilot-cli' ? 'github.com' : config.githubHost,
+            githubToken: '',
+            ...(next === 'copilot-cli' ? { credentialSource: 'copilot-cli' as const } : {}),
+            user: { login: '', id: 0, name: null, avatar_url: '' },
+          },
+          state: null,
+        });
+      }}>
+        <Option value="device-flow">{t('dashboard.upstreamEditor.copilot.deviceMethod')}</Option>
+        <Option value="copilot-cli">{t('dashboard.upstreamEditor.copilot.local.method')}</Option>
+      </Dropdown>
+    </Field>
+    {source === 'copilot-cli' && !isPersisted(record) && <CopilotCliConnect record={record} readOnly={readOnly} onPatch={onPatch} />}
+    {source === 'device-flow' && <Field label={{ children: infoLabelSlot(t('dashboard.upstreamEditor.copilot.githubHost'), t('dashboard.upstreamEditor.copilot.githubHostHint')) }}>
       <Controller
         control={control}
         name="config.githubHost"
@@ -403,21 +505,21 @@ function CopilotConfig({ onPatch, readOnly, record }: {
           value={field.value}
         />}
       />
-    </Field>
+    </Field>}
     {config.user.login
       ? <>
           <AccountSummary kind="copilot" title={config.user.name ?? config.user.login} subtitle={`${config.githubHost}/${config.user.login}`} />
           {isPersisted(record) ? <CopilotQuotaCard readOnly={readOnly} record={record} /> : !readOnly && <ReadyToSaveHint kind="copilot" />}
         </>
-      : <>
-          {error && <OutcomeMessageBar onDismiss={() => setError(null)}>{error}</OutcomeMessageBar>}
-          {!readOnly && (!flow ? <Button appearance="primary" disabled={githubHostEmpty} disabledFocusable={busy} icon={busy ? <Spinner size="tiny" /> : <PlugConnectedRegular />} onClick={() => void start()}>{t('dashboard.upstreamEditor.copilot.connect')}</Button> : <>
-            <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.copilot.deviceCode')}</Text>
-            <code className="mono-display tracking-[0.25em] text-fui-fg1">{flow.user_code}</code>
-            <Link href={flow.verification_uri} target="_blank" rel="noopener noreferrer">{flow.verification_uri}</Link>
-            <Spinner className="justify-self-start" label={t('dashboard.upstreamEditor.copilot.waiting')} labelPosition="after" size="tiny" />
-          </>)}
-        </>}
+      : source === 'device-flow' ? <>
+        {error && <OutcomeMessageBar onDismiss={() => setError(null)}>{error}</OutcomeMessageBar>}
+        {!readOnly && (!flow ? <Button appearance="primary" disabled={githubHostEmpty} disabledFocusable={busy} icon={busy ? <Spinner size="tiny" /> : <PlugConnectedRegular />} onClick={() => void start()}>{t('dashboard.upstreamEditor.copilot.connect')}</Button> : <>
+          <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.copilot.deviceCode')}</Text>
+          <code className="mono-display tracking-[0.25em] text-fui-fg1">{flow.user_code}</code>
+          <Link href={flow.verification_uri} target="_blank" rel="noopener noreferrer">{flow.verification_uri}</Link>
+          <Spinner className="justify-self-start" label={t('dashboard.upstreamEditor.copilot.waiting')} labelPosition="after" size="tiny" />
+        </>)}
+      </> : null}
   </div>;
 }
 

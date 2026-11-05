@@ -1,58 +1,25 @@
 # Node-local Copilot CLI credentials
 
-Floway can use a locally signed-in Copilot CLI account instead of a Copilot
-upstream's stored GitHub token. This is a Node-only, operator-controlled
-credential source, not a credential import or a browser account picker.
+Floway on Node can create a GitHub Copilot upstream from an account already
+signed in to the local Copilot CLI. The upstream stores only the selected
+account and `credentialSource: "copilot-cli"`, never a copy of the CLI token.
 
-## Configure a binding
+## Add an upstream in the dashboard
 
-1. Sign in with `copilot login` on the machine running Floway.
-2. Select an existing Copilot upstream belonging to the same GitHub account.
-3. Find the installed CLI's `prebuilds/<platform>/runtime.node` file. The reader
-   uses the CLI's private `authGetTokenForAuthInfo` interface, verified with
-   version `1.0.106-6`. Only use a CLI installation you trust: loading a native
-   module executes its code with the Floway service user's permissions.
-4. Set `FLOWAY_COPILOT_CLI_AUTH` before starting the Node service:
+1. Sign in with `copilot login` as the OS user running Floway.
+2. Open **Providers → Upstreams → New upstream → GitHub Copilot**.
+3. Select **Use local Copilot CLI** under **Authentication method**.
+4. Pick a signed-in GitHub account and click **Verify and connect**.
+5. Confirm the verified account and available models, then click **Save**.
 
-```sh
-export FLOWAY_COPILOT_CLI_AUTH='{"up_example":{"login":"your-github-login","runtimePath":"/absolute/path/to/copilot/prebuilds/darwin-arm64/runtime.node"}}'
-pnpm --filter @floway-dev/platform-node run start:built
-```
+Floway discovers the installed CLI runtime under `~/.copilot/pkg/<platform>/`
+automatically (or under `$COPILOT_HOME`). Set `FLOWAY_COPILOT_CLI_RUNTIME_PATH`
+to an absolute `runtime.node` path if the CLI is installed in a custom location.
+Only `github.com` accounts are supported by this source.
 
-Replace `up_example` with the upstream ID from the dashboard. Multiple upstream
-bindings may be supplied in the same JSON object. The service must run as the
-user who owns the CLI credential store. Custom CLI home directories, enterprise
-`.ghe.com` hosts, and non-GitHub account types are not supported by this first
-version. An invalid configuration fails startup. A bound upstream whose account
-no longer matches the configured login fails before reading any credential.
+## Credential lifetime
 
-The feature does not follow the CLI's default-account switch: it remains pinned
-to the explicitly configured login. Updating a binding requires restarting
-Floway. Unbound upstreams keep their existing authentication behavior.
-
-## Authentication and credential lifetime
-
-The reader starts an isolated child process for each credential read. It calls
-the installed CLI's secret-store API and sends the token over IPC. Child stdout
-and stderr are disabled; credentials are not placed in arguments, environment
-variables, the Floway database, or request dumps. Existing stored upstream
-credentials are neither removed nor replaced.
-
-CLI OAuth credentials authenticate directly to `https://api.githubcopilot.com`
-with the `copilot-cli` integration. They do not use the VS Code
-`/copilot_internal/v2/token` exchange. Model listing, inference, and quota queries
-use the selected source; requests still use the upstream's configured egress.
-
-Floway reads the currently stored credential, but does not refresh or reauthorize
-it. An unavailable CLI account or incompatible CLI runtime fails closed without
-falling back to the stored upstream token. An upstream 401 is returned normally;
-a later request rereads the credential. If the credential itself is invalid,
-reauthorize with `copilot login`. Redirects are disabled for local-credential
-requests.
-
-## Verification
-
-The package tests use synthetic credentials; they never require a local login
-or contact GitHub. Tests cover account binding, IPC-only transfer, worker
-compatibility failures, timeouts and aborts, direct authentication, quota
-queries, and redaction before request-capture persistence.
+Each credential read runs in an isolated subprocess and transfers the token
+over IPC with stdout and stderr disabled. Tokens are never written to the
+Floway database or persisted in request dumps. CLI credentials authenticate
+directly to `https://api.githubcopilot.com` with `copilot-integration-id: copilot-cli`.

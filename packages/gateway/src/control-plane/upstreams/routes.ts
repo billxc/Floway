@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 
+import { localCopilotAccessError } from './copilot.ts';
 import { cachedModelsForDashboard, modelsCacheStatus } from './models-cache-projection.ts';
 import { blueprintUpstreamRecord, upstreamRecordToFullJson, upstreamRecordToJson } from './serialize.ts';
 import { isValidProviderKind, upstreamErrorMessage as errorMessage } from './shared.ts';
@@ -378,13 +379,19 @@ export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) 
   // shape; codex / claude-code assert against null too — their blueprints
   // carry `{accounts: []}`, so an incoming null is a malformed request.
   try {
-    if (upstream.kind === 'copilot') readCopilotUpstreamState(stateFromBody);
-    else if (upstream.kind === 'codex') assertCodexUpstreamState(stateFromBody);
+    if (upstream.kind === 'copilot') {
+      const state = readCopilotUpstreamState(stateFromBody);
+      if (isRecord(config.value) && config.value.credentialSource === 'copilot-cli' && state.copilotToken !== null) return c.json({ error: 'Copilot CLI upstreams cannot store a Copilot token' }, 400);
+    } else if (upstream.kind === 'codex') assertCodexUpstreamState(stateFromBody);
     else if (upstream.kind === 'claude-code') readClaudeCodeUpstreamState(stateFromBody);
   } catch (err) {
     return c.json({ error: `Invalid state for ${upstream.kind}: ${errorMessage(err)}` }, 400);
   }
 
+  if (upstream.kind === 'copilot' && isRecord(config.value) && config.value.credentialSource === 'copilot-cli') {
+    const accessError = localCopilotAccessError(c);
+    if (accessError) return c.json({ error: accessError.error }, accessError.status);
+  }
   const record = { ...upstream, config: config.value };
   const saved = await appendUpstream(record);
   return c.json(await serializeForResponse(saved, knownProxyIds), 201);

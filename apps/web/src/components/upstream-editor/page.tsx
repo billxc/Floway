@@ -99,7 +99,7 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     // An upstream that already exists keeps the credential it was created
     // with, and the editor never sends it back.
     if (data.mode !== 'create') return;
-    if (record.kind === 'copilot' && !values.config.githubToken) ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.validation.copilot', path: ['config'] });
+    if (record.kind === 'copilot' && (values.config.credentialSource === 'copilot-cli' ? !values.config.user?.login || !values.config.user?.id : !values.config.githubToken)) ctx.addIssue({ code: 'custom', message: values.config.credentialSource === 'copilot-cli' ? 'dashboard.upstreamEditor.copilot.local.verifyRequired' : 'dashboard.upstreamEditor.validation.copilot', path: ['config'] });
     if ((record.kind === 'codex' || record.kind === 'claude-code') && values.config.accounts.length === 0) ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.validation.credential', path: ['config'] });
   }), [data.mode, record.kind]);
   const form = useForm<UpstreamEditorValues>({
