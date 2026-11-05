@@ -2,6 +2,7 @@ import pRetry, { AbortError as RetryAbortError } from 'p-retry';
 
 import { githubApiOrigin } from './github-host.ts';
 import { readCopilotUpstreamState, type CopilotTokenEntry, type CopilotUpstreamState } from './state.ts';
+import { readLocalCredential } from '@floway-dev/platform';
 import { dispatchUpstreamFetch, getProviderRepo as getRepo, isAbortError, type Fetcher, type FetchInit, type HttpHeaderLines } from '@floway-dev/provider';
 
 // Version constants pinned to a known-good fingerprint that mirrors what a
@@ -223,16 +224,22 @@ export interface CopilotAuth {
   id: string;
   githubHost: string;
   githubToken: string;
+  githubLogin?: string;
 }
 
 export async function copilotAuthedFetch(path: string, init: FetchInit, auth: CopilotAuth, options: CopilotFetchOptions): Promise<Response> {
   const signal = init.signal ?? undefined;
   let ownedInit: FetchInit | undefined = init;
-  // The token exchange is the only await before the data-plane dispatch. Keep
+  // Credential resolution happens before the data-plane dispatch. Keep
   // the body in an explicit owner and replace the generator parameter so the
   // final network wait cannot retain both copies after ownership transfers.
   init = { signal };
-  const entry = await getCopilotToken(auth.id, auth.githubHost, auth.githubToken, options.fetcher, signal);
+  const local = await readLocalCredential({ upstreamId: auth.id, host: auth.githubHost, login: auth.githubLogin ?? '' }, signal);
+  // CLI-sourced credentials authenticate directly instead of using the VS Code exchange.
+  // https://github.com/github/copilot-cli
+  const entry = local === null
+    ? await getCopilotToken(auth.id, auth.githubHost, auth.githubToken, options.fetcher, signal)
+    : { token: local.token, baseUrl: 'https://api.githubcopilot.com' };
 
   // x-request-id and x-agent-task-id share a single per-call UUID, mirroring
   // VSCode Copilot Chat's "one id ties the request to its background task" pattern.
@@ -272,7 +279,15 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
     }
   }
 
-  const request = { ...ownedInit, headers };
+  if (local !== null) {
+    headers.set('Authorization', `Bearer ${local.token}`);
+    // The CLI integration accepts its own GitHub OAuth credentials directly.
+    // https://github.com/github/copilot-cli
+    headers.set('copilot-integration-id', 'copilot-cli');
+    headers.set('user-agent', 'Floway');
+  }
+
+  const request = { ...ownedInit, headers, ...(local !== null ? { redirect: 'error' as const } : {}) };
   ownedInit = undefined;
   // Do not await here: the dispatch owner clears its body synchronously, then
   // this async frame can disappear while the upstream network wait continues.

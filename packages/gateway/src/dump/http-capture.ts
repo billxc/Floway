@@ -1,5 +1,5 @@
 import type { DumpCapture } from './types.ts';
-import { encodeBodyForWire } from './wire.ts';
+import { encodeBodyForWire, redactSensitiveHeaders } from './wire.ts';
 import { isReplayableBody, type Fetcher } from '@floway-dev/http';
 
 const errorText = (error: unknown): string => error instanceof Error ? error.stack ?? error.message : String(error);
@@ -17,7 +17,7 @@ export class HttpCapture {
         request: {
           url,
           method: request.method,
-          headers: [...request.headers],
+          headers: redactSensitiveHeaders([...request.headers]),
           body: encodeBodyForWire(bytes, request.headers.get('content-type') ?? ''),
         },
         response: null,

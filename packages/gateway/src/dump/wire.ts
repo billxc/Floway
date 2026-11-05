@@ -26,7 +26,7 @@ const REDACTED_HEADER_VALUE = '[redacted]';
 
 // The owner of a key may read the dump, but the upstream credentials in it
 // belong to an operator who granted Model.Use, not to that key owner.
-const redactSensitiveHeaders = (headers: ReadonlyArray<readonly [string, string]>): Array<[string, string]> =>
+export const redactSensitiveHeaders = (headers: ReadonlyArray<readonly [string, string]>): Array<[string, string]> =>
   headers.map(([name, value]) => [name, SENSITIVE_HEADERS.has(name.toLowerCase()) ? REDACTED_HEADER_VALUE : value]);
 
 // Wire encoding decision: textual content-types try UTF-8 first and fall

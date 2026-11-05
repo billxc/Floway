@@ -7,7 +7,7 @@ export const runCopilotScheduledTask = async (record: UpstreamRecord, options: P
   const snapshot = readCopilotUpstreamState(record.state).quotaSnapshot;
   await runScheduledUsageRefresh(record, options, snapshot?.fetchedAt ?? null, async (fresh, fetcher) => {
     const { config } = assertCopilotUpstreamRecord(fresh);
-    const response = await fetchCopilotUsage(config.githubHost, config.githubToken, fetcher);
+    const response = await fetchCopilotUsage(config.githubHost, config.githubToken, fetcher, { upstreamId: fresh.id, host: config.githubHost, login: config.user.login });
     if (!response.ok) throw new Error(`Copilot usage returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
     const body = await response.json() as CopilotUsageResponse;
     const now = new Date();
