@@ -115,13 +115,19 @@ export const geminiGenerateContentFunctionResponsePart = (part: GeminiGenerateCo
   return { response, id: unmatched?.shift() ?? id };
 };
 
-// Reasoning effort is freeform on the inbound IRs — the gateway never
-// enum-gates these values at the wire boundary — so the translate-side
-// mappers below return whatever Gemini generateContent surfaced for `thinkingLevel` /
-// derived from `thinkingBudget` verbatim.
-
-export const geminiGenerateContentThinkingLevelEffort = (thinkingConfig?: GeminiGenerateContentThinkingConfig): string | undefined =>
-  thinkingConfig?.thinkingLevel;
+// Translate Google's named thinking levels to target effort names; unspecified
+// leaves effort unset. Preserve all other open-string values verbatim.
+// Reference: https://ai.google.dev/api/generate-content#ThinkingLevel
+export const geminiGenerateContentThinkingLevelEffort = (thinkingConfig?: GeminiGenerateContentThinkingConfig): string | undefined => {
+  switch (thinkingConfig?.thinkingLevel) {
+    case 'LOW': return 'low';
+    case 'MEDIUM': return 'medium';
+    case 'HIGH': return 'high';
+    case 'MINIMAL': return 'minimal';
+    case 'THINKING_LEVEL_UNSPECIFIED': return undefined;
+    default: return thinkingConfig?.thinkingLevel;
+  }
+};
 
 // Bucket Gemini generateContent's numeric `thinkingBudget` back onto the discrete
 // `reasoning_effort` axis when the target protocol has no numeric budget

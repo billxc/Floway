@@ -4,6 +4,27 @@ import { buildTargetRequest } from '../../src/gemini-generate-content-via-openai
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import { assertEquals, assertThrows } from '@floway-dev/test-utils';
 
+test.each([
+  ['LOW', 'low'],
+  ['MEDIUM', 'medium'],
+  ['HIGH', 'high'],
+  ['MINIMAL', 'minimal'],
+  ['THINKING_LEVEL_UNSPECIFIED', undefined],
+  ['low', 'low'],
+  ['medium', 'medium'],
+  ['high', 'high'],
+  ['minimal', 'minimal'],
+  ['VENDOR_Turbo', 'VENDOR_Turbo'],
+  ['Low', 'Low'],
+] as const)('buildTargetRequest translates thinkingLevel %s to reasoning_effort %s', (thinkingLevel, effort) => {
+  const request = buildTargetRequest({
+    generationConfig: { thinkingConfig: { thinkingLevel } },
+  }, 'gpt-test');
+
+  assertEquals(request.reasoning_effort, effort);
+  if (effort === undefined) assertEquals('reasoning_effort' in request, false);
+});
+
 test('buildTargetRequest forwards an empty thinkingLevel verbatim', () => {
   const request = buildTargetRequest({
     generationConfig: { thinkingConfig: { thinkingLevel: '' } },
