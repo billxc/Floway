@@ -129,6 +129,70 @@ test('/v1/images/generations rejects model on custom upstream without /images/ge
   );
 });
 
+test.each(['generations', 'edits'])('/v1/images/%s forwards through Copilot and records image usage', async operation => {
+  const { apiKey, repo } = await setupAppTest();
+  clearInProcessCopilotTokenCache();
+  const model = 'gpt-image-2.5-flare';
+  const path = `/v1/images/${operation}`;
+  const output = {
+    data: [{ b64_json: PNG_B64 }],
+    usage: { input_tokens: 7, input_tokens_details: { text_tokens: 5, image_tokens: 2 }, output_tokens: 11, output_tokens_details: { text_tokens: 0, image_tokens: 11 } },
+  };
+  let calls = 0;
+  await withMockedFetch(
+    async request => {
+      const { pathname } = new URL(request.url);
+      if (pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+      }
+      if (pathname === '/models') {
+        return jsonResponse({ object: 'list', data: [{ id: model, name: 'GPT Image 2.5 Flare', capabilities: { type: 'image' }, supported_endpoints: ['/v1/images/generations', '/v1/images/edits'] }] });
+      }
+      if (pathname === path) {
+        calls++;
+        assertEquals(request.headers.get('authorization'), 'Bearer copilot-access-token');
+        if (operation === 'generations') {
+          assertEquals(await request.json(), { model, prompt: 'a blue bird', quality: 'future-quality' });
+        } else {
+          const form = await request.formData();
+          assertEquals(form.get('model'), model);
+          assertEquals(form.get('prompt'), 'a blue bird');
+          assertEquals(form.get('quality'), 'future-quality');
+          assertEquals(await (form.get('image') as File).text(), 'image-bytes');
+          assertEquals(await (form.get('mask') as File).text(), 'mask-bytes');
+        }
+        return new Response(JSON.stringify(output), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'copilot-image' } });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const headers = { 'x-api-key': apiKey.key };
+      let body: string | FormData;
+      if (operation === 'generations') {
+        body = JSON.stringify({ model, prompt: 'a blue bird', quality: 'future-quality' });
+      } else {
+        body = new FormData();
+        body.set('model', model);
+        body.set('prompt', 'a blue bird');
+        body.set('quality', 'future-quality');
+        body.set('image', new File(['image-bytes'], 'image.png', { type: 'image/png' }));
+        body.set('mask', new File(['mask-bytes'], 'mask.png', { type: 'image/png' }));
+      }
+      const response = await requestAppWithWarmModels(path, {
+        method: 'POST', headers: { ...headers, ...(operation === 'generations' ? { 'content-type': 'application/json' } : {}) }, body,
+      });
+      assertEquals(response.status, 201);
+      assertEquals(response.headers.get('x-request-id'), 'copilot-image');
+      assertEquals(await response.json(), output);
+      await flushAsyncWork();
+    },
+  );
+  assertEquals(calls, 1);
+  const usageRows = (await repo.usage.listAll()).filter(row => row.model === model);
+  assertEquals(usageRows.length, 1);
+  assertEquals(tokenCountsFromUsage(usageRows[0]), { input: 5, input_image: 2, output_image: 11 });
+});
+
 test('/v1/images/generations forwards a JSON request through a custom upstream and records usage', async () => {
   const { apiKey, repo } = await setupAppTest();
   clearInProcessCopilotTokenCache();

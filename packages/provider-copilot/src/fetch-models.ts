@@ -22,7 +22,6 @@ const isCopilotModelsResponse = (value: unknown): value is CopilotModelsResponse
 const MODELS_HEADER_OVERRIDES: HttpHeaderLines = [
   ['openai-intent', 'model-access'],
   ['x-interaction-type', 'model-access'],
-  ['content-type', ''],
 ];
 
 export const fetchCopilotModels = (config: CopilotFetchConfig, fetcher: Fetcher): Promise<CopilotModelsResponse> =>

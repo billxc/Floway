@@ -1,5 +1,5 @@
 import { base64ToBytes, bytesToBase64, parseBase64ImageDataUrl } from './image-helpers.ts';
-import { jsonRequestBody } from './json-request.ts';
+import { jsonRequest } from './json-request.ts';
 import type { ReplayableBody } from './options.ts';
 import type { OpenAIImageEditReference } from '@floway-dev/protocols/openai-images';
 
@@ -91,8 +91,11 @@ const multipartBody = (request: OpenAIImagesEditsRequest, model: string): FormDa
   return form;
 };
 
-export const serializeOpenAIImagesEditsRequest = async (request: OpenAIImagesEditsRequest, model: string): Promise<FormData | ReplayableBody> => {
+export const serializeOpenAIImagesEditsRequest = async (
+  request: OpenAIImagesEditsRequest,
+  model: string,
+): Promise<{ body: FormData | ReplayableBody; headers?: HeadersInit }> => {
   const multipart = multipartBody(request, model);
-  if (multipart !== null) return multipart;
-  return jsonRequestBody(await serializeOpenAIImagesEditsJsonPayload(request, model));
+  if (multipart !== null) return { body: multipart };
+  return jsonRequest(await serializeOpenAIImagesEditsJsonPayload(request, model));
 };

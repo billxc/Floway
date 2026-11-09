@@ -115,8 +115,8 @@ export const createAzureProvider = (record: UpstreamRecord): Provider => {
     callOpenAIImagesGenerations: (model, body, signal, opts) => callNonStreaming(azureFetchOpenAIImagesGenerations, model, body, signal, [...opts.headers], opts),
     callOpenAIImagesEdits: async (model, request, signal, opts) => {
       const upstreamModelId = upstreamModelIdOf(model);
-      const body = await serializeOpenAIImagesEditsRequest(request, upstreamModelId);
-      const response = await azureFetchOpenAIImagesEdits(azure.config, { method: 'POST', body, signal }, { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall });
+      const serialized = await serializeOpenAIImagesEditsRequest(request, upstreamModelId);
+      const response = await azureFetchOpenAIImagesEdits(azure.config, { method: 'POST', ...serialized, signal }, { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall });
       return { response, modelKey: upstreamModelId };
     },
     callOpenAIAudioTranscriptions: async (model, request, signal, opts) => {

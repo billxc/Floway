@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { jsonRequestBody } from '../src/json-request.ts';
+import { jsonRequest, jsonRequestBody } from '../src/json-request.ts';
 import { jsonInteger } from '@floway-dev/protocols/common';
 
 const readChunks = async (body: ReturnType<typeof jsonRequestBody>): Promise<Uint8Array[]> => {
@@ -8,6 +8,16 @@ const readChunks = async (body: ReturnType<typeof jsonRequestBody>): Promise<Uin
   for await (const chunk of body.open()) chunks.push(chunk);
   return chunks;
 };
+
+test('JSON request construction pairs its media type with a replayable snapshot', async () => {
+  const value = { text: 'before' };
+  const { body, headers } = jsonRequest(value);
+  value.text = 'after';
+
+  expect(new Headers(headers).get('content-type')).toBe('application/json');
+  expect(await new Response(body.open()).json()).toEqual({ text: 'before' });
+  expect(await new Response(body.open()).json()).toEqual({ text: 'before' });
+});
 
 test('preserves exact raw integer tokens through snapshots and repeated request serialization', async () => {
   const value = { properties: { items: { maxItems: jsonInteger(9007199254740993n) } } };

@@ -115,7 +115,7 @@ export { directFetcher, dispatchUpstreamFetch, identityWrapUpstreamCall, isRepla
 
 export { isAbortError } from './abort.ts';
 
-export { jsonRequestBody } from './json-request.ts';
+export { jsonRequest, jsonRequestBody } from './json-request.ts';
 export { sha256Json, sha256JsonHex } from './json-hash.ts';
 
 export {

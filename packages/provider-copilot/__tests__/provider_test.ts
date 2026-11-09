@@ -112,6 +112,7 @@ interface CopilotModelFixture {
   id: string;
   display_name?: string;
   supported_endpoints?: string[];
+  type?: string;
   reasoningEfforts?: string[];
   maxContextWindowTokens?: number;
   maxPromptTokens?: number;
@@ -127,7 +128,7 @@ const copilotModels = (models: CopilotModelFixture[]) => ({
     version: '1',
     supported_endpoints: model.supported_endpoints ?? [],
     capabilities: {
-      type: 'chat',
+      type: model.type ?? 'chat',
       limits: {
         ...(model.maxContextWindowTokens !== undefined ? { max_context_window_tokens: model.maxContextWindowTokens } : {}),
         ...(model.maxPromptTokens !== undefined ? { max_prompt_tokens: model.maxPromptTokens } : {}),
@@ -136,6 +137,79 @@ const copilotModels = (models: CopilotModelFixture[]) => ({
       ...(model.reasoningEfforts !== undefined ? { supports: { reasoning_effort: model.reasoningEfforts } } : {}),
     },
   })),
+});
+
+const copilotTokenResponse = (): Response => jsonResponse({
+  token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600,
+  endpoints: { api: 'https://api.individual.githubcopilot.com' },
+});
+
+test.each([
+  { paths: ['/v1/images/generations', '/v1/images/edits'], endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } },
+  { paths: ['/images/generations'], endpoints: { openaiImagesGenerations: {} } },
+  { paths: ['/images/edits'], endpoints: { openaiImagesEdits: {} } },
+  { paths: [], endpoints: {} },
+])('Copilot image capabilities follow the advertised endpoints: $paths', async ({ paths, endpoints }) => {
+  const { copilotUpstream } = await setupCopilotTest();
+  const provider = createCopilotProvider(copilotUpstream).instance;
+  await withMockedFetch(
+    request => {
+      const { pathname } = new URL(request.url);
+      if (pathname === '/copilot_internal/v2/token') return copilotTokenResponse();
+      if (pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'gpt-image-2.5-flare', display_name: 'GPT Image 2.5 Flare', type: 'image', supported_endpoints: paths }]));
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const [model] = await provider.getProvidedModels(directFetcher);
+      assertEquals(model.id, 'gpt-image-2.5-flare');
+      assertEquals(model.display_name, 'GPT Image 2.5 Flare');
+      assertEquals(model.endpoints, endpoints);
+      assertEquals(model.kind === 'image', paths.length > 0);
+      assertEquals(model.chat, undefined);
+    },
+  );
+});
+
+test('Copilot image edits preserve JSON references, parameters, and upstream errors', async () => {
+  const { copilotUpstream } = await setupCopilotTest();
+  const provider = createCopilotProvider(copilotUpstream).instance;
+  const failureBody = '{"error":{"message":"image policy rejected","type":"invalid_request_error"}}';
+  let calls = 0;
+  await withMockedFetch(
+    async request => {
+      const { pathname } = new URL(request.url);
+      if (pathname === '/copilot_internal/v2/token') return copilotTokenResponse();
+      if (pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'image-preview', type: 'image', supported_endpoints: ['/v1/images/edits'] }]));
+      }
+      if (pathname === '/v1/images/edits') {
+        calls++;
+        assertEquals(request.headers.get('authorization'), 'Bearer copilot-access-token');
+        assertEquals(request.headers.get('content-type'), 'application/json');
+        assertEquals(await request.json(), {
+          model: 'image-preview', prompt: 'make it blue', quality: 'future-quality',
+          images: [{ image_url: 'https://example.com/image.png', detail: 'high' }], mask: { file_id: 'file-mask' },
+        });
+        return new Response(failureBody, { status: 403, headers: { 'content-type': 'application/json', 'x-request-id': 'image-error' } });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const [model] = await provider.getProvidedModels(directFetcher);
+      const result = await provider.callOpenAIImagesEdits(model, {
+        images: [{ type: 'reference', reference: { image_url: 'https://example.com/image.png', detail: 'high' } }],
+        mask: { type: 'reference', reference: { file_id: 'file-mask' } },
+        parameters: { prompt: 'make it blue', quality: 'future-quality' },
+      }, undefined, noopUpstreamCallOptions());
+      assertEquals(result.modelKey, 'image-preview');
+      assertEquals(result.response.status, 403);
+      assertEquals(result.response.headers.get('x-request-id'), 'image-error');
+      assertEquals(await result.response.text(), failureBody);
+    },
+  );
+  assertEquals(calls, 1);
 });
 
 test('Copilot provider exposes the highest-priority non-Claude endpoint', async () => {
@@ -382,6 +456,7 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
         return jsonResponse(copilotModels([{ id: 'gpt-resp', supported_endpoints: ['/responses'] }]));
       }
       if (url.pathname === '/responses') {
+        assertEquals(request.headers.get('content-type'), 'application/json');
         openaiResponsesBody = (await request.json()) as Record<string, unknown>;
         visionHeader = request.headers.get('copilot-vision-request');
         initiatorHeader = request.headers.get('x-initiator');
@@ -573,6 +648,7 @@ test('Copilot provider forces stream=true for streaming endpoints and leaves cou
       }
 
       const path = url.pathname;
+      assertEquals(request.headers.get('content-type'), 'application/json');
       bodies[path] = (await request.json()) as Record<string, unknown>;
 
       if (['/chat/completions', '/responses', '/v1/messages'].includes(path)) {
@@ -1585,6 +1661,7 @@ test('Copilot provider derives decision endpoints and forwards the System One bo
         );
       }
       if (url.pathname === '/v1/systemone') {
+        assertEquals(request.headers.get('content-type'), 'application/json');
         sent.push((await request.json()) as Record<string, unknown>);
         return jsonResponse({
           model: 'microsoft-decision-1',

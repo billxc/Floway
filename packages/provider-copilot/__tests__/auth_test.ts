@@ -54,6 +54,7 @@ const installRepoAndClearCache = async () => {
 const mockTokenAndCapture = async (
   extraHeaders: HttpHeaderLines | undefined,
   assert: (headers: Headers) => void,
+  contentType = 'application/json',
 ): Promise<void> => {
   await installRepoAndClearCache();
   let captured: Headers | null = null;
@@ -75,7 +76,7 @@ const mockTokenAndCapture = async (
     async () => {
       await copilotAuthedFetch(
         '/v1/messages',
-        { method: 'POST', body: '{}' },
+        { method: 'POST', body: '{}', headers: { 'content-type': contentType } },
         { id: UPSTREAM_ID, githubHost: 'github.com', githubToken: 'ghu_test' },
         extraHeaders ? { headers: extraHeaders, fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall } : { fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall },
       );
@@ -85,6 +86,38 @@ const mockTokenAndCapture = async (
   if (!captured) throw new Error('upstream call never observed');
   assert(captured);
 };
+
+test('Copilot authentication preserves the request media type', async () => {
+  await mockTokenAndCapture(undefined, headers => {
+    assertEquals(headers.get('content-type'), 'application/vnd.test+json');
+  }, 'application/vnd.test+json');
+});
+
+test('Copilot authentication leaves multipart boundary generation to the transport', async () => {
+  await installRepoAndClearCache();
+  const body = new FormData();
+  body.set('model', 'image-preview');
+  body.set('image', new File(['image-bytes'], 'image.png', { type: 'image/png' }));
+  let calls = 0;
+  await withMockedFetch(
+    async request => {
+      if (new URL(request.url).pathname === '/copilot_internal/v2/token') return tokenResponse();
+      calls++;
+      expect(request.headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/);
+      expect(request.headers.get('authorization')).toBe('Bearer tok-test');
+      const form = await request.formData();
+      expect(form.get('model')).toBe('image-preview');
+      expect(await (form.get('image') as File).text()).toBe('image-bytes');
+      return jsonResponse({});
+    },
+    async () => {
+      await copilotAuthedFetch('/v1/images/edits', { method: 'POST', body },
+        { id: UPSTREAM_ID, githubHost: 'github.com', githubToken: 'ghu_test' },
+        { fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall });
+    },
+  );
+  expect(calls).toBe(1);
+});
 
 const runAuthedFetch = async (fetcher: Fetcher, signal?: AbortSignal): Promise<Response> => {
   await installRepoAndClearCache();

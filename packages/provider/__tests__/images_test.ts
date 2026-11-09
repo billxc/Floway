@@ -3,8 +3,9 @@ import { test } from 'vitest';
 import { serializeOpenAIImagesEditsJsonPayload, serializeOpenAIImagesEditsRequest } from '../src/images.ts';
 import { assertEquals } from '@floway-dev/test-utils';
 
-const parseJsonBody = async (body: Awaited<ReturnType<typeof serializeOpenAIImagesEditsRequest>>): Promise<unknown> => {
+const parseJsonBody = async ({ body, headers }: Awaited<ReturnType<typeof serializeOpenAIImagesEditsRequest>>): Promise<unknown> => {
   if (body instanceof FormData) throw new Error('expected a JSON image-edit body');
+  assertEquals(new Headers(headers).get('content-type'), 'application/json');
   return await new Response(body.open()).json();
 };
 
@@ -49,8 +50,9 @@ test('serializeOpenAIImagesEditsRequest uses the singular field for one upload a
     images: [{ type: 'upload', file: first }],
     parameters: { prompt: 'single' },
   }, 'gpt-image');
-  assertEquals(single instanceof FormData, true);
-  const singleForm = single as FormData;
+  assertEquals(single.body instanceof FormData, true);
+  assertEquals(new Headers(single.headers).has('content-type'), false);
+  const singleForm = single.body as FormData;
   assertEquals(singleForm.get('image'), first);
   assertEquals(singleForm.getAll('image[]'), []);
 
@@ -58,8 +60,9 @@ test('serializeOpenAIImagesEditsRequest uses the singular field for one upload a
     images: [{ type: 'upload', file: first }, { type: 'upload', file: second }],
     parameters: { prompt: 'multiple' },
   }, 'gpt-image');
-  assertEquals(multiple instanceof FormData, true);
-  const multipleForm = multiple as FormData;
+  assertEquals(multiple.body instanceof FormData, true);
+  assertEquals(new Headers(multiple.headers).has('content-type'), false);
+  const multipleForm = multiple.body as FormData;
   assertEquals(multipleForm.getAll('image[]'), [first, second]);
   assertEquals(multipleForm.get('image'), null);
   assertEquals(multipleForm.get('model'), 'gpt-image');
