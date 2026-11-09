@@ -54,6 +54,7 @@ const installRepoAndClearCache = async () => {
 const mockTokenAndCapture = async (
   extraHeaders: HttpHeaderLines | undefined,
   assert: (headers: Headers) => void,
+  contentType = 'application/json',
 ): Promise<void> => {
   await installRepoAndClearCache();
   let captured: Headers | null = null;
@@ -75,7 +76,7 @@ const mockTokenAndCapture = async (
     async () => {
       await copilotAuthedFetch(
         '/v1/messages',
-        { method: 'POST', body: '{}' },
+        { method: 'POST', body: '{}', headers: { 'content-type': contentType } },
         { id: UPSTREAM_ID, githubHost: 'github.com', githubToken: 'ghu_test' },
         extraHeaders ? { headers: extraHeaders, fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall } : { fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall },
       );
@@ -85,6 +86,12 @@ const mockTokenAndCapture = async (
   if (!captured) throw new Error('upstream call never observed');
   assert(captured);
 };
+
+test('Copilot authentication preserves the request media type', async () => {
+  await mockTokenAndCapture(undefined, headers => {
+    assertEquals(headers.get('content-type'), 'application/vnd.test+json');
+  }, 'application/vnd.test+json');
+});
 
 test('Copilot authentication leaves multipart boundary generation to the transport', async () => {
   await installRepoAndClearCache();

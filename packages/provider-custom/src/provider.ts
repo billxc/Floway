@@ -255,8 +255,8 @@ export const createCustomProvider = (record: UpstreamRecord): Provider => {
     callOpenAIImagesGenerations: (model, body, signal, opts) => call(customFetchOpenAIImagesGenerations, model, body, signal, headersForCall(opts.headers), opts),
     callOpenAIImagesEdits: async (model, request, signal, opts) => {
       const rawModelId = rawModelIdOf(model);
-      const body = await serializeOpenAIImagesEditsRequest(request, rawModelId);
-      const response = await customFetchOpenAIImagesEdits(config, { method: 'POST', body, signal }, { extraHeaders: headersForCall(opts.headers), fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall });
+      const serialized = await serializeOpenAIImagesEditsRequest(request, rawModelId);
+      const response = await customFetchOpenAIImagesEdits(config, { method: 'POST', ...serialized, signal }, { extraHeaders: headersForCall(opts.headers), fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall });
       return { response, modelKey: rawModelId };
     },
     callOpenAIAudioTranscriptions: async (model, request, signal, opts) => {

@@ -24,7 +24,7 @@ import { type ModelEndpointKey, type ModelEndpoints, type ProtocolFrame, isFastS
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseOpenAIChatCompletionsStream, type OpenAIChatCompletionsPayload, type OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
-import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, serializeOpenAIImagesEditsRequest, readUpstreamApiError, streamingProviderCall, apiErrorToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequest, serializeOpenAIImagesEditsRequest, readUpstreamApiError, streamingProviderCall, apiErrorToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 interface CopilotProviderData {
   rawModels: CopilotRawModel[];
@@ -116,11 +116,10 @@ const copilotModelEndpoints = (rawModels: readonly CopilotRawModel[]): ModelEndp
     return { openaiChatCompletions: {} };
   }
 
-  const imageEndpoints: ModelEndpoints = {
-    ...(rawModels.some(model => rawModelSupportsEndpoint(model, 'openaiImagesGenerations')) ? { openaiImagesGenerations: {} } : {}),
-    ...(rawModels.some(model => rawModelSupportsEndpoint(model, 'openaiImagesEdits')) ? { openaiImagesEdits: {} } : {}),
-  };
-  if (Object.keys(imageEndpoints).length > 0) return imageEndpoints;
+  const imageEndpoints: ModelEndpoints = {};
+  if (rawModels.some(model => rawModelSupportsEndpoint(model, 'openaiImagesGenerations'))) imageEndpoints.openaiImagesGenerations = {};
+  if (rawModels.some(model => rawModelSupportsEndpoint(model, 'openaiImagesEdits'))) imageEndpoints.openaiImagesEdits = {};
+  if (imageEndpoints.openaiImagesGenerations || imageEndpoints.openaiImagesEdits) return imageEndpoints;
 
   if (rawModels.some(model => rawModelSupportsEndpoint(model, 'openaiEmbeddings'))) return { openaiEmbeddings: {} };
   // A decision model is a family of one: no other endpoint family shares its
@@ -238,7 +237,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       upstreamConfig,
       {
         method: 'POST',
-        body: jsonRequestBody({ ...body, model: rawModel.id }),
+        ...jsonRequest({ ...body, model: rawModel.id }),
         signal,
       },
       { extraHeaders: headers, fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall, waitUntil: opts.waitUntil },
@@ -260,7 +259,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
         upstreamConfig,
         {
           method: 'POST',
-          body: jsonRequestBody({ ...body, stream: true, model: rawModel.id }),
+          ...jsonRequest({ ...body, stream: true, model: rawModel.id }),
           signal,
         },
         { extraHeaders: headers, fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall, waitUntil: opts.waitUntil },
@@ -423,7 +422,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
             const triggered = { ...wireBody, input: [...input, COMPACTION_TRIGGER], stream: false, model: rawModel.id };
             const response = await copilotFetchOpenAIResponses(
               upstreamConfig,
-              { method: 'POST', body: jsonRequestBody(triggered), signal },
+              { method: 'POST', ...jsonRequest(triggered), signal },
               { extraHeaders: [...ctx.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall, waitUntil: opts.waitUntil },
             );
             if (!response.ok) return { action: 'compact', ok: false, response, modelKey: rawModel.id };
@@ -507,10 +506,10 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     callOpenAIImagesGenerations: (model, body, signal, opts) => call(copilotFetchOpenAIImagesGenerations, body, signal, rawModelFor(model, 'openaiImagesGenerations'), [...opts.headers], opts),
     callOpenAIImagesEdits: async (model, request, signal, opts) => {
       const rawModel = rawModelFor(model, 'openaiImagesEdits');
-      const body = await serializeOpenAIImagesEditsRequest(request, rawModel.id);
+      const serialized = await serializeOpenAIImagesEditsRequest(request, rawModel.id);
       const response = await copilotFetchOpenAIImagesEdits(
         upstreamConfig,
-        { method: 'POST', body, signal },
+        { method: 'POST', ...serialized, signal },
         { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall, waitUntil: opts.waitUntil },
       );
       return { response, modelKey: rawModel.id };
@@ -525,7 +524,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       const response = await copilotFetchSystemOne(
         upstreamConfig,
         target.path ?? DEFAULT_DECISION_PATHS[target.protocol],
-        { method: 'POST', body: jsonRequestBody(body), signal },
+        { method: 'POST', ...jsonRequest(body), signal },
         { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall },
       );
       return { response, modelKey: rawModel.id, target };

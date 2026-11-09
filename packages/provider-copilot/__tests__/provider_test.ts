@@ -139,6 +139,11 @@ const copilotModels = (models: CopilotModelFixture[]) => ({
   })),
 });
 
+const copilotTokenResponse = (): Response => jsonResponse({
+  token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600,
+  endpoints: { api: 'https://api.individual.githubcopilot.com' },
+});
+
 test.each([
   { paths: ['/v1/images/generations', '/v1/images/edits'], endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } },
   { paths: ['/images/generations'], endpoints: { openaiImagesGenerations: {} } },
@@ -150,9 +155,7 @@ test.each([
   await withMockedFetch(
     request => {
       const { pathname } = new URL(request.url);
-      if (pathname === '/copilot_internal/v2/token') {
-        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
-      }
+      if (pathname === '/copilot_internal/v2/token') return copilotTokenResponse();
       if (pathname === '/models') {
         return jsonResponse(copilotModels([{ id: 'gpt-image-2.5-flare', display_name: 'GPT Image 2.5 Flare', type: 'image', supported_endpoints: paths }]));
       }
@@ -177,15 +180,14 @@ test('Copilot image edits preserve JSON references, parameters, and upstream err
   await withMockedFetch(
     async request => {
       const { pathname } = new URL(request.url);
-      if (pathname === '/copilot_internal/v2/token') {
-        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
-      }
+      if (pathname === '/copilot_internal/v2/token') return copilotTokenResponse();
       if (pathname === '/models') {
         return jsonResponse(copilotModels([{ id: 'image-preview', type: 'image', supported_endpoints: ['/v1/images/edits'] }]));
       }
       if (pathname === '/v1/images/edits') {
         calls++;
         assertEquals(request.headers.get('authorization'), 'Bearer copilot-access-token');
+        assertEquals(request.headers.get('content-type'), 'application/json');
         assertEquals(await request.json(), {
           model: 'image-preview', prompt: 'make it blue', quality: 'future-quality',
           images: [{ image_url: 'https://example.com/image.png', detail: 'high' }], mask: { file_id: 'file-mask' },
@@ -454,6 +456,7 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
         return jsonResponse(copilotModels([{ id: 'gpt-resp', supported_endpoints: ['/responses'] }]));
       }
       if (url.pathname === '/responses') {
+        assertEquals(request.headers.get('content-type'), 'application/json');
         openaiResponsesBody = (await request.json()) as Record<string, unknown>;
         visionHeader = request.headers.get('copilot-vision-request');
         initiatorHeader = request.headers.get('x-initiator');
@@ -645,6 +648,7 @@ test('Copilot provider forces stream=true for streaming endpoints and leaves cou
       }
 
       const path = url.pathname;
+      assertEquals(request.headers.get('content-type'), 'application/json');
       bodies[path] = (await request.json()) as Record<string, unknown>;
 
       if (['/chat/completions', '/responses', '/v1/messages'].includes(path)) {
@@ -1657,6 +1661,7 @@ test('Copilot provider derives decision endpoints and forwards the System One bo
         );
       }
       if (url.pathname === '/v1/systemone') {
+        assertEquals(request.headers.get('content-type'), 'application/json');
         sent.push((await request.json()) as Record<string, unknown>);
         return jsonResponse({
           model: 'microsoft-decision-1',

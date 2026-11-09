@@ -26,6 +26,11 @@ const serializedLength = (value: object): number => {
   return length;
 };
 
+export const jsonRequest = (value: object): { body: ReplayableBody; headers: HeadersInit } => ({
+  body: jsonRequestBody(value),
+  headers: { 'content-type': 'application/json' },
+});
+
 export const jsonRequestBody = (value: object): ReplayableBody => {
   const snapshot = klona(value);
   return {
