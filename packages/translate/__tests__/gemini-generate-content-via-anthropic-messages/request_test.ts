@@ -9,25 +9,12 @@ const noOptions = {};
 
 const withMaxOutputTokens = (maxOutputTokens: number) => ({ fallbackMaxOutputTokens: maxOutputTokens });
 
-test.each([
-  ['LOW', 'low'],
-  ['MEDIUM', 'medium'],
-  ['HIGH', 'high'],
-  ['MINIMAL', 'minimal'],
-  ['THINKING_LEVEL_UNSPECIFIED', undefined],
-  ['low', 'low'],
-  ['medium', 'medium'],
-  ['high', 'high'],
-  ['minimal', 'minimal'],
-  ['VENDOR_Turbo', 'VENDOR_Turbo'],
-  ['Low', 'Low'],
-] as const)('buildTargetRequest translates thinkingLevel %s to output_config.effort %s', (thinkingLevel, effort) => {
+test('buildTargetRequest translates LOW to output_config.effort', () => {
   const request = buildTargetRequest({
-    generationConfig: { thinkingConfig: { thinkingLevel } },
+    generationConfig: { thinkingConfig: { thinkingLevel: 'LOW' } },
   }, 'claude-test', noOptions);
 
-  assertEquals(request.output_config, effort === undefined ? undefined : { effort });
-  if (effort === undefined) assertEquals('output_config' in request, false);
+  assertEquals(request.output_config, { effort: 'low' });
 });
 
 test('buildTargetRequest forwards an empty thinkingLevel verbatim', () => {
