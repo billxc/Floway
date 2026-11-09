@@ -241,7 +241,7 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
   if (ownedInit === undefined) throw new Error('Copilot request ownership missing before dispatch');
   const headers = new Headers(ownedInit.headers);
   headers.set('Authorization', `Bearer ${entry.token}`);
-  headers.set('Content-Type', 'application/json');
+  if (!(ownedInit.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   headers.set('editor-version', EDITOR_VERSION);
   headers.set('editor-plugin-version', EDITOR_PLUGIN_VERSION);
   headers.set('editor-device-id', getEditorDeviceId());

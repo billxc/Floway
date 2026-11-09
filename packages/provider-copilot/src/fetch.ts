@@ -73,6 +73,12 @@ export const copilotFetchAnthropicMessagesCountTokens = (config: CopilotFetchCon
   copilotFetchInternal(config, '/v1/messages/count_tokens', init, options);
 export const copilotFetchOpenAIEmbeddings = (config: CopilotFetchConfig, init: FetchInit, options: CopilotDataPlaneFetchOptions): Promise<Response> =>
   copilotFetchInternal(config, '/embeddings', init, options);
+// Copilot advertises the OpenAI Images paths in each image model's supported_endpoints.
+// https://github.com/caozhiyuan/copilot-api/blob/ab09bd671fc984896372b0b56f1c8211847808c0/src/services/copilot/images.ts
+export const copilotFetchOpenAIImagesGenerations = (config: CopilotFetchConfig, init: FetchInit, options: CopilotDataPlaneFetchOptions): Promise<Response> =>
+  copilotFetchInternal(config, '/v1/images/generations', init, options);
+export const copilotFetchOpenAIImagesEdits = (config: CopilotFetchConfig, init: FetchInit, options: CopilotDataPlaneFetchOptions): Promise<Response> =>
+  copilotFetchInternal(config, '/v1/images/edits', init, options);
 export const copilotFetchModels = (config: CopilotFetchConfig, init: FetchInit, options: CopilotDataPlaneFetchOptions): Promise<Response> =>
   copilotFetchInternal(config, '/models', init, options);
 // Copilot serves decision models at the System One path it advertises in

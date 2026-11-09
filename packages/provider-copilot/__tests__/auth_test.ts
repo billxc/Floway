@@ -86,6 +86,32 @@ const mockTokenAndCapture = async (
   assert(captured);
 };
 
+test('Copilot authentication leaves multipart boundary generation to the transport', async () => {
+  await installRepoAndClearCache();
+  const body = new FormData();
+  body.set('model', 'image-preview');
+  body.set('image', new File(['image-bytes'], 'image.png', { type: 'image/png' }));
+  let calls = 0;
+  await withMockedFetch(
+    async request => {
+      if (new URL(request.url).pathname === '/copilot_internal/v2/token') return tokenResponse();
+      calls++;
+      expect(request.headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/);
+      expect(request.headers.get('authorization')).toBe('Bearer tok-test');
+      const form = await request.formData();
+      expect(form.get('model')).toBe('image-preview');
+      expect(await (form.get('image') as File).text()).toBe('image-bytes');
+      return jsonResponse({});
+    },
+    async () => {
+      await copilotAuthedFetch('/v1/images/edits', { method: 'POST', body },
+        { id: UPSTREAM_ID, githubHost: 'github.com', githubToken: 'ghu_test' },
+        { fetcher: directFetcher, wrapUpstreamCall: identityWrapUpstreamCall });
+    },
+  );
+  expect(calls).toBe(1);
+});
+
 const runAuthedFetch = async (fetcher: Fetcher, signal?: AbortSignal): Promise<Response> => {
   await installRepoAndClearCache();
   return await copilotAuthedFetch(
