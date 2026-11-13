@@ -217,6 +217,78 @@ test('buildTargetRequest flattens text-block tool_result content but serializes 
   ]);
 });
 
+test.each([false, true])('buildTargetRequest sends tool-result images after all parallel outputs (split messages: %s)', async splitMessages => {
+  const content: AnthropicMessagesUserContentBlock[] = [
+    { type: 'text', text: 'Before results.' },
+    {
+      type: 'tool_result',
+      tool_use_id: 'toolu_first',
+      content: [
+        { type: 'text', text: 'First screenshot.' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' } },
+        { type: 'text', text: 'After screenshot.' },
+      ],
+    },
+    {
+      type: 'tool_result',
+      tool_use_id: 'toolu_second',
+      content: [{ type: 'image', source: { type: 'url', url: 'https://example.com/screenshot.png' } }],
+    },
+    { type: 'text', text: 'Continue.' },
+  ];
+  const result = await buildWithTestSidecar({
+    model: 'gpt-test',
+    max_tokens: 256,
+    messages: splitMessages
+      ? [{ role: 'user', content: content.slice(0, 2) }, { role: 'user', content: content.slice(2) }]
+      : [{ role: 'user', content }],
+  });
+
+  assertEquals(result.messages, [
+    { role: 'user', content: 'Before results.' },
+    { role: 'tool', tool_call_id: 'toolu_first', content: 'First screenshot.\n\nAfter screenshot.' },
+    { role: 'tool', tool_call_id: 'toolu_second', content: '' },
+    {
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+        { type: 'image_url', image_url: { url: 'https://example.com/screenshot.png' } },
+        { type: 'text', text: 'Continue.' },
+      ],
+    },
+  ]);
+});
+
+test('buildTargetRequest preserves a trailing tool-result image and rejects file-only images', async () => {
+  const payload: AnthropicMessagesPayload = {
+    model: 'gpt-test',
+    max_tokens: 256,
+    messages: [{
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        tool_use_id: 'toolu_image',
+        content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'aW1hZ2U=' } }],
+      }],
+    }],
+  };
+  const result = await buildWithTestSidecar(payload);
+  assertEquals(result.messages, [
+    { role: 'tool', tool_call_id: 'toolu_image', content: '' },
+    { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,aW1hZ2U=' } }] },
+  ]);
+
+  payload.messages = [{
+    role: 'user',
+    content: [{
+      type: 'tool_result',
+      tool_use_id: 'toolu_image',
+      content: [{ type: 'image', source: { type: 'file', file_id: 'file_image' } }],
+    }],
+  }];
+  await assertRejects(() => buildWithTestSidecar(payload), Error, 'Cannot translate file_id-only Anthropic image input to Chat Completions.');
+});
+
 test('buildTargetRequest preserves mixed user/tool_result chronology', async () => {
   const result = await buildWithTestSidecar({
     model: 'gpt-test',
