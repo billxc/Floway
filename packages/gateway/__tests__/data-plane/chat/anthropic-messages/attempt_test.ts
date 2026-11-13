@@ -200,6 +200,32 @@ test('generate translate-to-responses branch routes through openaiResponsesAttem
   assertEquals(upstreamHeaders?.has('anthropic-beta'), false);
 });
 
+test('generate preserves the legacy output cap for a custom Chat target', async () => {
+  installRepo();
+  let calls = 0;
+  const callOpenAIChatCompletions = async (_model: unknown, body: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
+    calls++;
+    const payload = body as { max_tokens?: number; max_completion_tokens?: number };
+    assertEquals(payload.max_tokens, 16);
+    assertEquals(payload.max_completion_tokens, 16);
+    return {
+      ok: true, modelKey: 'legacy', headers: new Headers(),
+      events: makeProtocolFrames([{
+        id: 'chatcmpl_legacy', object: 'chat.completion.chunk', created: 1, model: 'test-model',
+        choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }],
+      }]),
+    };
+  };
+  const result = await anthropicMessagesAttempt.generate({
+    payload: makePayload({ max_tokens: 16 }), ctx: makeGatewayCtx(),
+    candidate: makeCandidate({ callOpenAIChatCompletions, endpoints: { openaiChatCompletions: {} } }),
+    headers: new Headers(), anthropicBeta: [],
+  });
+  if (result.type !== 'events') throw new Error('Expected a successful custom target');
+  await collectEvents(result.events);
+  assertEquals(calls, 1);
+});
+
 test('generate does not carry Anthropic Messages beta metadata through translation to OpenAI Chat Completions', async () => {
   installRepo();
   let upstreamHeaders: Headers | undefined;
