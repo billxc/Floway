@@ -26,10 +26,11 @@ const flattenToolResultContent = (content: AnthropicMessagesToolResultBlock['con
   if (content === undefined) return '';
   if (typeof content === 'string') return content;
 
-  const textBlocks = content.filter((block): block is AnthropicMessagesTextBlockParam => block.type === 'text');
-  if (textBlocks.length === content.length) return textBlocks.map(block => block.text).join('\n\n');
+  const parts = content.filter(block => block.type !== 'image');
+  const textBlocks = parts.filter((block): block is AnthropicMessagesTextBlockParam => block.type === 'text');
+  if (textBlocks.length === parts.length) return textBlocks.map(block => block.text).join('\n\n');
 
-  return JSON.stringify(content);
+  return JSON.stringify(parts);
 };
 
 // OpenAI strict-mode JSON Schema validators reject an object schema without an
@@ -110,17 +111,22 @@ const flushPendingAssistantMessage = (messages: OpenAIChatCompletionsMessage[], 
   pending.reasoningText.length = 0;
 };
 
-const translateAnthropicMessagesUser = (message: AnthropicMessagesUserMessage, messageIdx: number, legacyFunctionNames: Map<string, string>): OpenAIChatCompletionsMessage[] => {
+const translateAnthropicMessagesUser = (
+  message: AnthropicMessagesUserMessage,
+  messageIdx: number,
+  legacyFunctionNames: Map<string, string>,
+  pendingToolImages: Extract<AnthropicMessagesUserContentBlock, { type: 'image' }>[],
+): OpenAIChatCompletionsMessage[] => {
+  const messages: OpenAIChatCompletionsMessage[] = [];
   if (!Array.isArray(message.content)) {
-    return [
-      {
-        role: 'user',
-        content: message.content,
-      },
-    ];
+    if (pendingToolImages.length > 0) {
+      messages.push({ role: 'user', content: toOpenAIChatCompletionsContent(pendingToolImages) });
+      pendingToolImages.length = 0;
+    }
+    messages.push({ role: 'user', content: message.content });
+    return messages;
   }
 
-  const messages: OpenAIChatCompletionsMessage[] = [];
   const pendingUserBlocks: Exclude<AnthropicMessagesUserContentBlock, AnthropicMessagesToolResultBlock>[] = [];
 
   const flushPendingUserBlocks = () => {
@@ -139,6 +145,12 @@ const translateAnthropicMessagesUser = (message: AnthropicMessagesUserMessage, m
       // so interleaved user content and tool results become alternating messages.
       flushPendingUserBlocks();
       const content = flattenToolResultContent(block.content);
+      // Chat tool messages only accept text. Keep images out of text tokenization
+      // and send them after the contiguous tool outputs as multimodal user input.
+      // https://platform.openai.com/docs/api-reference/chat/create#chat_create-messages
+      if (Array.isArray(block.content)) {
+        for (const part of block.content) if (part.type === 'image') pendingToolImages.push(part);
+      }
       const legacyName = legacyFunctionNames.get(block.tool_use_id);
       legacyFunctionNames.delete(block.tool_use_id);
       messages.push(legacyName === undefined
@@ -151,7 +163,8 @@ const translateAnthropicMessagesUser = (message: AnthropicMessagesUserMessage, m
       throw new TranslatorInputError(`messages.${messageIdx}.content.${blockIdx}.type: '${(block as { type: string }).type}' content blocks are not supported on this model`);
     }
 
-    pendingUserBlocks.push(block);
+    pendingUserBlocks.push(...pendingToolImages, block);
+    pendingToolImages.length = 0;
   }
 
   flushPendingUserBlocks();
@@ -298,12 +311,16 @@ export const buildTargetRequest = async (
         }
       }
       messages.push(...(roundTrip ? [roundTrip.turn] : turn.items.flatMap((message, index) => translateAnthropicMessagesAssistant(message, messageIndex + index))));
-    } else for (const [index, message] of turn.items.entries()) {
-      switch (message.role) {
-      case 'user': messages.push(...translateAnthropicMessagesUser(message, messageIndex + index, legacyFunctionNames)); break;
-      case 'system': messages.push(...translateAnthropicMessagesSystem(message)); break;
-      default: throw new TranslatorInputError(`messages.${messageIndex + index}.role: role '${(message as { role: string }).role}' is not supported on this model`);
+    } else {
+      const pendingToolImages: Extract<AnthropicMessagesUserContentBlock, { type: 'image' }>[] = [];
+      for (const [index, message] of turn.items.entries()) {
+        switch (message.role) {
+        case 'user': messages.push(...translateAnthropicMessagesUser(message, messageIndex + index, legacyFunctionNames, pendingToolImages)); break;
+        case 'system': messages.push(...translateAnthropicMessagesSystem(message)); break;
+        default: throw new TranslatorInputError(`messages.${messageIndex + index}.role: role '${(message as { role: string }).role}' is not supported on this model`);
+        }
       }
+      if (pendingToolImages.length > 0) messages.push({ role: 'user', content: toOpenAIChatCompletionsContent(pendingToolImages) });
     }
     messageIndex += turn.items.length;
   }
