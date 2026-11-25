@@ -187,22 +187,28 @@ export const copilotQuota = async (c: CtxWithJson<typeof copilotQuotaBody>) => {
 
   let githubHost: string;
   let githubToken: string;
+  let cliLogin: string | undefined;
   let fetcher: Fetcher;
   try {
     const parsed = parseCopilotDraftConfig(record.config);
     githubHost = parsed.githubHost;
     const { config } = parsed;
-    if (typeof config.githubToken !== 'string' || config.githubToken === '') {
-      return c.json({ error: 'Copilot upstream has no GitHub token' }, 400);
+    if (config.credentialSource === 'copilot-cli') {
+      cliLogin = isRecord(config.user) && typeof config.user.login === 'string' ? config.user.login : '';
+      githubToken = '';
+    } else {
+      if (typeof config.githubToken !== 'string' || config.githubToken === '') {
+        return c.json({ error: 'Copilot upstream has no GitHub token' }, 400);
+      }
+      githubToken = config.githubToken;
     }
-    githubToken = config.githubToken;
     fetcher = await resolveControlPlaneFetcher({ override: record.proxy_fallback_list, runtimeLocation: getRuntimeLocation(c.req.raw) });
   } catch (e: unknown) {
     return c.json({ error: errorMessage(e) }, 400);
   }
 
   try {
-    const resp = await fetchCopilotUsage(githubHost, githubToken, fetcher);
+    const resp = await fetchCopilotUsage(githubHost, githubToken, fetcher, cliLogin);
 
     if (!resp.ok) {
       const text = await resp.text();

@@ -28,6 +28,7 @@
 
 import { githubHeaders } from './auth.ts';
 import { githubApiOrigin } from './github-host.ts';
+import { resolveCopilotUsageToken } from './local-cli.ts';
 import { resolveCopilotQuotaUnlimited } from './quota-entitlement.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
 import { copilotMetrics } from './upstream-metrics.ts';
@@ -289,8 +290,10 @@ export const putCopilotSeat = async (upstreamId: string, seat: CopilotSeat): Pro
   } satisfies CopilotUpstreamState));
 };
 
-export const fetchCopilotUsage = (githubHost: string, githubToken: string, fetcher: Fetcher): Promise<Response> =>
-  fetcher(`${githubApiOrigin(githubHost)}/copilot_internal/user`, { headers: githubHeaders(githubToken) });
+export const fetchCopilotUsage = async (githubHost: string, githubToken: string, fetcher: Fetcher, cliLogin?: string): Promise<Response> => {
+  const token = await resolveCopilotUsageToken(githubHost, githubToken, cliLogin);
+  return await fetcher(`${githubApiOrigin(githubHost)}/copilot_internal/user`, { headers: githubHeaders(token) });
+};
 
 export const putCopilotQuota = async (upstreamId: string, snapshot: CopilotQuotaSnapshot): Promise<void> => {
   const fetchedAt = Date.parse(snapshot.observed_at);

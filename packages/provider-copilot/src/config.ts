@@ -1,4 +1,5 @@
 import { normalizeGitHubHost } from './github-host.ts';
+import { COPILOT_CLI_CREDENTIAL_SOURCE, type CopilotCredentialSource } from './local-cli.ts';
 import type { UpstreamRecord } from '@floway-dev/provider';
 
 export interface CopilotUpstreamUser {
@@ -11,6 +12,7 @@ export interface CopilotUpstreamUser {
 export interface CopilotUpstreamConfig {
   githubHost: string;
   githubToken: string;
+  credentialSource?: CopilotCredentialSource;
   user: CopilotUpstreamUser;
 }
 
@@ -55,13 +57,32 @@ const integerField = (value: unknown, field: string, err: FieldErrorBuilder): nu
   return value;
 };
 
-const copilotUserField = (value: unknown, err: FieldErrorBuilder): CopilotUpstreamUser => {
+const copilotUserField = (value: unknown, err: FieldErrorBuilder, requireLogin = false): CopilotUpstreamUser => {
   if (!isRecord(value)) throw err('user', 'an object');
   return {
-    login: stringField(value.login, 'user.login', err),
+    login: requireLogin ? nonEmptyStringField(value.login, 'user.login', err) : stringField(value.login, 'user.login', err),
     avatar_url: stringField(value.avatar_url, 'user.avatar_url', err),
     name: nullableStringField(value.name, 'user.name', err),
     id: integerField(value.id, 'user.id', err),
+  };
+};
+
+const credentialFields = (
+  value: Record<string, unknown>,
+  githubHost: string,
+  err: FieldErrorBuilder,
+  requireToken: boolean,
+): Pick<CopilotUpstreamConfig, 'githubToken' | 'credentialSource'> => {
+  if (value.credentialSource !== undefined && value.credentialSource !== COPILOT_CLI_CREDENTIAL_SOURCE) {
+    throw err('credentialSource', `${COPILOT_CLI_CREDENTIAL_SOURCE} or omitted`);
+  }
+  if (value.credentialSource === COPILOT_CLI_CREDENTIAL_SOURCE) {
+    if (githubHost !== 'github.com') throw err('githubHost', 'github.com for Copilot CLI credentials');
+    if (stringField(value.githubToken ?? '', 'githubToken', err) !== '') throw err('githubToken', 'empty for Copilot CLI credentials');
+    return { githubToken: '', credentialSource: COPILOT_CLI_CREDENTIAL_SOURCE };
+  }
+  return {
+    githubToken: requireToken ? nonEmptyStringField(value.githubToken, 'githubToken', err) : stringField(value.githubToken, 'githubToken', err),
   };
 };
 
@@ -70,23 +91,25 @@ const copilotUserField = (value: unknown, err: FieldErrorBuilder): CopilotUpstre
 // rejections differently.
 export const parseCopilotUpstreamConfig = (value: unknown, err: FieldErrorBuilder): CopilotUpstreamConfig => {
   if (!isRecord(value)) throw err('config', 'an object');
+  const githubHost = githubHostField(value.githubHost, err);
   return {
-    githubHost: githubHostField(value.githubHost, err),
-    githubToken: nonEmptyStringField(value.githubToken, 'githubToken', err),
-    user: copilotUserField(value.user, err),
+    githubHost,
+    ...credentialFields(value, githubHost, err, true),
+    user: copilotUserField(value.user, err, value.credentialSource === COPILOT_CLI_CREDENTIAL_SOURCE),
   };
 };
 
 export const assertCopilotUpstreamRecord = (record: UpstreamRecord): CopilotUpstreamRecord => {
   if (record.kind !== 'copilot') throw new Error(`Expected copilot upstream record, got ${record.kind}`);
   if (!isRecord(record.config)) throw malformedConfig('config', 'an object');
+  const githubHost = githubHostField(record.config.githubHost, malformedConfig);
   return {
     ...record,
     kind: 'copilot',
     config: {
-      githubHost: githubHostField(record.config.githubHost, malformedConfig),
-      githubToken: stringField(record.config.githubToken, 'githubToken', malformedConfig),
-      user: copilotUserField(record.config.user, malformedConfig),
+      githubHost,
+      ...credentialFields(record.config, githubHost, malformedConfig, false),
+      user: copilotUserField(record.config.user, malformedConfig, record.config.credentialSource === COPILOT_CLI_CREDENTIAL_SOURCE),
     },
   };
 };
