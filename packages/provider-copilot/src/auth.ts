@@ -264,12 +264,12 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
   headers.set('editor-version', EDITOR_VERSION);
   headers.set('editor-plugin-version', EDITOR_PLUGIN_VERSION);
   headers.set('editor-device-id', getEditorDeviceId());
-  headers.set('user-agent', isCli ? COPILOT_CLI_USER_AGENT : USER_AGENT);
+  headers.set('user-agent', USER_AGENT);
   headers.set('x-github-api-version', COPILOT_API_VERSION);
   headers.set('x-vscode-user-agent-library-version', 'electron-fetch');
   headers.set('x-request-id', requestId);
   headers.set('x-agent-task-id', requestId);
-  headers.set('copilot-integration-id', isCli ? COPILOT_CLI_INTEGRATION_ID : 'vscode-chat');
+  headers.set('copilot-integration-id', 'vscode-chat');
   headers.set('openai-intent', 'conversation-agent');
   headers.set('x-interaction-type', 'conversation-agent');
 
@@ -289,6 +289,14 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
       if (value === '') headers.delete(name);
       else headers.set(name, value);
     }
+  }
+
+  // Re-apply after interceptors so VSCode-specific interceptors (such as
+  // `set-claude-agent-headers`, which clears `copilot-integration-id`) cannot
+  // strip the integration header required by Copilot CLI tokens.
+  if (isCli) {
+    headers.set('copilot-integration-id', COPILOT_CLI_INTEGRATION_ID);
+    headers.set('user-agent', COPILOT_CLI_USER_AGENT);
   }
 
   const request = { ...ownedInit, headers };

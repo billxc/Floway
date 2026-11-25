@@ -45,7 +45,11 @@ describe('provider-copilot local CLI credentials', () => {
       '/chat/completions',
       { method: 'POST', body: '{}' },
       { id: 'up_copilot_cli_octocat', githubHost: 'github.com', githubToken: '', githubLogin: 'octocat', credentialSource: 'copilot-cli' },
-      { fetcher, wrapUpstreamCall: dispatch => dispatch() },
+      {
+        fetcher,
+        headers: [['copilot-integration-id', ''], ['user-agent', 'claude-cli/1.0']],
+        wrapUpstreamCall: dispatch => dispatch(),
+      },
     );
 
     expect(calls).toHaveLength(1);
