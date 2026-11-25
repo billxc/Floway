@@ -1,6 +1,13 @@
 import pRetry, { AbortError as RetryAbortError } from 'p-retry';
 
 import { githubApiOrigin } from './github-host.ts';
+import {
+  COPILOT_CLI_INTEGRATION_ID,
+  COPILOT_CLI_USER_AGENT,
+  isCopilotCliCredential,
+  resolveCopilotCliToken,
+  type CopilotCredentialSource,
+} from './local-cli.ts';
 import { readCopilotUpstreamState, type CopilotTokenEntry, type CopilotUpstreamState } from './state.ts';
 import { dispatchUpstreamFetch, getProviderRepo as getRepo, isAbortError, type Fetcher, type FetchInit, type HttpHeaderLines } from '@floway-dev/provider';
 
@@ -223,16 +230,21 @@ export interface CopilotAuth {
   id: string;
   githubHost: string;
   githubToken: string;
+  githubLogin?: string;
+  credentialSource?: CopilotCredentialSource;
 }
 
 export async function copilotAuthedFetch(path: string, init: FetchInit, auth: CopilotAuth, options: CopilotFetchOptions): Promise<Response> {
   const signal = init.signal ?? undefined;
   let ownedInit: FetchInit | undefined = init;
-  // The token exchange is the only await before the data-plane dispatch. Keep
+  // Credential resolution happens before the data-plane dispatch. Keep
   // the body in an explicit owner and replace the generator parameter so the
   // final network wait cannot retain both copies after ownership transfers.
   init = { signal };
-  const entry = await getCopilotToken(auth.id, auth.githubHost, auth.githubToken, options.fetcher, signal);
+  const isCli = isCopilotCliCredential(auth);
+  const entry = isCli
+    ? await resolveCopilotCliToken(auth, signal)
+    : await getCopilotToken(auth.id, auth.githubHost, auth.githubToken, options.fetcher, signal);
 
   // x-request-id and x-agent-task-id share a single per-call UUID, mirroring
   // VSCode Copilot Chat's "one id ties the request to its background task" pattern.
@@ -252,12 +264,12 @@ export async function copilotAuthedFetch(path: string, init: FetchInit, auth: Co
   headers.set('editor-version', EDITOR_VERSION);
   headers.set('editor-plugin-version', EDITOR_PLUGIN_VERSION);
   headers.set('editor-device-id', getEditorDeviceId());
-  headers.set('user-agent', USER_AGENT);
+  headers.set('user-agent', isCli ? COPILOT_CLI_USER_AGENT : USER_AGENT);
   headers.set('x-github-api-version', COPILOT_API_VERSION);
   headers.set('x-vscode-user-agent-library-version', 'electron-fetch');
   headers.set('x-request-id', requestId);
   headers.set('x-agent-task-id', requestId);
-  headers.set('copilot-integration-id', 'vscode-chat');
+  headers.set('copilot-integration-id', isCli ? COPILOT_CLI_INTEGRATION_ID : 'vscode-chat');
   headers.set('openai-intent', 'conversation-agent');
   headers.set('x-interaction-type', 'conversation-agent');
 

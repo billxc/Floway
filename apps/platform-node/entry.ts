@@ -2,6 +2,7 @@ import { serve, upgradeWebSocket } from '@hono/node-server';
 import { WebSocketServer } from 'ws';
 
 import { bootstrapNodePlatform } from './src/bootstrap.ts';
+import { ensureBuiltinCopilotCliUpstreams } from './src/copilot-cli-bootstrap.ts';
 import { applyMigrations } from './src/migrate.ts';
 import { startScheduledMaintenance } from './src/scheduled-maintenance.ts';
 import { createNodeFetchHandler, nodeWebDistDir } from './src/static-web.ts';
@@ -45,7 +46,9 @@ if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_KEY) {
 }
 
 await applyMigrations(db);
-initRepo(new SqlRepo(db));
+const repo = new SqlRepo(db);
+initRepo(repo);
+await ensureBuiltinCopilotCliUpstreams(repo);
 initExecutionCellNamespace(new InProcessExecutionCellNamespace(handleExecutionRequest));
 
 const scheduleBackground = (promise: Promise<unknown>): void => {
